@@ -1,0 +1,52 @@
+[package]
+name = "sish-console"
+version = "1.0.0"
+edition = "2021"
+authors = ["Sish Development Team"]
+description = "A friendly, character-themed terminal emulator for Sish shell"
+license = "MIT"
+repository = "https://github.com/sish-shell/sish-console"
+
+[dependencies]
+# GTK4 for GUI
+gtk4 = { version = "0.9", features = ["v4_14"] }
+# VTE for terminal emulation
+vte4 = "0.8"
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+# Unix socket handling
+tokio-stream = "0.1"
+# JSON serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Configuration
+toml = "0.8"
+# Directories for config paths
+dirs = "5.0"
+# Logging
+log = "0.4"
+env_logger = "0.11"
+# GLib for GTK integration
+glib = "0.20"
+gio = "0.20"
+# CSS parsing for themes
+cssparser = "0.34"
+# Image loading for character sprites
+image = "0.25"
+# Cairo for custom drawing
+cairo-rs = { version = "0.20", features = ["png"] }
+# Pango for text rendering
+pango = "0.20"
+
+[features]
+default = []
+llm = []  # Enable LLM integration features
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+
+[[bin]]
+name = "sish-console"
+path = "src/main.rs"

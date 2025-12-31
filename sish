@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+SISH_PATH="/tmp/sish-test/bin/zsh"
+SISH_CONFIG="$SCRIPT_DIR/config/sishrc"
+
+if [[ ! -x "$SISH_PATH" ]]; then
+    echo "Sish: 実行ファイルが見つからないよ: $SISH_PATH" >&2
+    echo "ヒント: /home/rinta/Documents/github/Sish/zsh-5.9 で make install を実行してね" >&2
+    exit 127
+fi
+
+# zshは「rcファイルのパスを引数で渡す」仕様ではないので、
+# ZDOTDIRに隔離した .zshrc を用意して、対話シェルとして起動する。
+DOTDIR="$(mktemp -d)"
+cleanup() {
+    rm -rf "$DOTDIR" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+cat > "$DOTDIR/.zshrc" << 'EOFRC'
+# Sish temporary .zshrc (isolated via ZDOTDIR)
+
+setopt AUTO_CD
+setopt CORRECT
+setopt HIST_IGNORE_DUPS
+setopt SHARE_HISTORY
+
+HISTFILE=~/.sish_history
+HISTSIZE=10000
+SAVEHIST=10000
+
+PROMPT='%F{213}🌸 Sish%f:%F{111}%~%f %# '
+
+# 補完（Tab）
+autoload -Uz compinit
+compinit -d ~/.sish_compdump 2>/dev/null || true
+
+# 未定義コマンド提案を即実行
+y() {
+    local f="/tmp/sish-last-suggestion-$$"
+    local sug=""
+    if [[ -r "$f" ]]; then
+        sug="$(< "$f")"
+        rm -f "$f" 2>/dev/null || true
+    else
+        sug="${SISH_LAST_SUGGESTION:-}"
+    fi
+
+    if [[ -n "$sug" ]]; then
+        local cmd="${sug%% *}"
+        command -- "$cmd" "$@"
+    else
+        print -r -- "Sish：お兄ちゃん、いま実行できる候補が無いよ…"
+        return 1
+    fi
+}
+
+# 便利コマンド（デフォルト）
+summon() { command git clone -- "$@"; }
+
+void() {
+    if [[ $# -lt 1 ]]; then
+        print -r -- "Sish：お兄ちゃん、voidは消したいパスを指定してね！（例: void ./tmp）"
+        return 2
+    fi
+    if [[ "$1" == "/" ]]; then
+        print -r -- "Sish：それはダメ！ '/' は消しちゃだめ！"
+        return 1
+    fi
+    command rm -rf -- "$@"
+}
+
+fiat() {
+    if (( EUID == 0 )); then
+        command -- "$@"
+    else
+        print -r -- "Sish：お兄ちゃん、fiatはSishが管理者で動いてる時だけパスワードレスだよ…（sudoで実行するね）"
+        command sudo -- "$@"
+    fi
+}
+
+gaze() { command ls -lahFt --color=auto -- "$@"; }
+
+lore() {
+    if [[ $# -ne 1 ]]; then
+        print -r -- "Sish：loreは1つだけ指定してね！（例: lore myfile）"
+        return 2
+    fi
+    command cp -a -- "$1" "$1.back"
+}
+
+node() {
+    if [[ $# -lt 1 ]]; then
+        print -r -- "Sish：nodeは2つの候補ディレクトリを渡してね！（例: node hoge foo）"
+        return 2
+    fi
+    if [[ -d "$1" ]]; then
+        builtin cd -- "$1"
+        return $?
+    fi
+    if [[ $# -ge 2 && -d "$2" ]]; then
+        builtin cd -- "$2"
+        return $?
+    fi
+    print -r -- "Sish：お兄ちゃん、どっちもフォルダじゃなかった…"
+    return 1
+}
+
+alias ls='ls --color=auto -F'
+alias ll='ls --color=auto -lahF'
+alias la='ls --color=auto -A'
+alias ..='cd ..'
+alias g='git'
+alias py='python3'
+
+# カスタムコマンド（簡単に追加できる）
+# 例: ~/.sish/commands.zsh や ~/.sish/commands.d/*.zsh
+if [[ -f ~/.sish/commands.zsh ]]; then
+    source ~/.sish/commands.zsh
+fi
+if [[ -d ~/.sish/commands.d ]]; then
+    for f in ~/.sish/commands.d/*.zsh(N); do
+        source "$f"
+    done
+fi
+
+echo "🌸 Sish - Sister Shell"
+echo "💡 ヒント: sish-config で設定メニュー"
+echo ""
+EOFRC
+
+if [[ -f "$SISH_CONFIG" ]]; then
+    cat "$SISH_CONFIG" >> "$DOTDIR/.zshrc"
+fi
+
+# ユーザー設定（sish-config が書き出す先）を最後に読み込む
+if [[ -f "$HOME/.sishrc" ]]; then
+    {
+        echo ""
+        echo "# User sishrc"
+        cat "$HOME/.sishrc"
+    } >> "$DOTDIR/.zshrc"
+fi
+
+export ZDOTDIR="$DOTDIR"
+
+# argv[0] を "Sish" にして、メッセージの見た目も統一する
+is_non_interactive=0
+for a in "$@"; do
+    if [[ "$a" == "-c" || "$a" == "--help" || "$a" == "--version" ]]; then
+        is_non_interactive=1
+        break
+    fi
+done
+
+if [[ $is_non_interactive -eq 1 ]]; then
+    exec -a Sish "$SISH_PATH" "$@"
+else
+    exec -a Sish "$SISH_PATH" -i "$@"
+fi

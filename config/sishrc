@@ -1,0 +1,165 @@
+# Sish設定ファイル
+# ~/.sishrc に配置してください
+
+# ========================================
+# プロンプト設定
+# ========================================
+PROMPT='%F{213}Sish%f:%F{111}%~%f %# '
+
+# ========================================
+# 基本設定
+# ========================================
+setopt AUTO_CD              # ディレクトリ名だけで移動
+setopt CORRECT              # コマンド訂正
+setopt HIST_IGNORE_DUPS     # 重複履歴を無視
+setopt SHARE_HISTORY        # 履歴を共有
+
+# ========================================
+# 履歴設定
+# ========================================
+HISTFILE=~/.sish_history
+HISTSIZE=10000
+SAVEHIST=10000
+
+# ========================================
+# エイリアス
+# ========================================
+alias ls='ls --color=auto -F'
+alias ll='ls --color=auto -lahF'
+alias la='ls --color=auto -A'
+alias l='ls --color=auto -CF'
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Git
+alias g='git'
+alias gs='git status'
+alias ga='git add'
+alias gc='git commit'
+alias gp='git push'
+alias gl='git pull'
+
+# Docker
+alias d='docker'
+alias dc='docker-compose'
+
+# Python
+alias py='python3'
+alias ipy='ipython'
+
+# ========================================
+# 便利な関数
+# ========================================
+
+# 未定義コマンド提案を即実行（次の行で y と打つ）
+y() {
+    local f="/tmp/sish-last-suggestion-$$"
+    local sug=""
+    if [[ -r "$f" ]]; then
+        sug="$(< "$f")"
+        rm -f "$f" 2>/dev/null || true
+    else
+        sug="${SISH_LAST_SUGGESTION:-}"
+    fi
+
+    if [[ -n "$sug" ]]; then
+        local cmd="${sug%% *}"
+        command -- "$cmd" "$@"
+    else
+        print -r -- "Sish：お兄ちゃん、いま実行できる候補が無いよ…"
+        return 1
+    fi
+}
+
+# 追加コマンド
+summon() { command git clone -- "$@"; }
+
+void() {
+    if [[ $# -lt 1 ]]; then
+        print -r -- "Sish：お兄ちゃん、voidは消したいパスを指定してね！（例: void ./tmp）"
+        return 2
+    fi
+    if [[ "$1" == "/" ]]; then
+        print -r -- "Sish：それはダメ！ '/' は消しちゃだめ！"
+        return 1
+    fi
+    command rm -rf -- "$@"
+}
+
+fiat() {
+    if (( EUID == 0 )); then
+        command -- "$@"
+    else
+        print -r -- "Sish：お兄ちゃん、fiatはSishが管理者で動いてる時だけパスワードレスだよ…（sudoで実行するね）"
+        command sudo -- "$@"
+    fi
+}
+
+gaze() { command ls -lahFt --color=auto -- "$@"; }
+
+lore() {
+    if [[ $# -ne 1 ]]; then
+        print -r -- "Sish：loreは1つだけ指定してね！（例: lore myfile）"
+        return 2
+    fi
+    command cp -a -- "$1" "$1.back"
+}
+
+node() {
+    if [[ $# -lt 1 ]]; then
+        print -r -- "Sish：nodeは2つの候補ディレクトリを渡してね！（例: node hoge foo）"
+        return 2
+    fi
+    if [[ -d "$1" ]]; then
+        builtin cd -- "$1"
+        return $?
+    fi
+    if [[ $# -ge 2 && -d "$2" ]]; then
+        builtin cd -- "$2"
+        return $?
+    fi
+    print -r -- "Sish：お兄ちゃん、どっちもフォルダじゃなかった…"
+    return 1
+}
+
+# ディレクトリ作成と移動
+mkcd() {
+    mkdir -p "$1" && cd "$1"
+}
+
+# ファイル解凍
+extract() {
+    if [ -f "$1" ]; then
+        case "$1" in
+            *.tar.bz2)   tar xjf "$1"     ;;
+            *.tar.gz)    tar xzf "$1"     ;;
+            *.bz2)       bunzip2 "$1"     ;;
+            *.gz)        gunzip "$1"      ;;
+            *.tar)       tar xf "$1"      ;;
+            *.zip)       unzip "$1"       ;;
+            *.Z)         uncompress "$1"  ;;
+            *)           echo "'$1' は解凍できないよ..." ;;
+        esac
+    else
+        echo "'$1' は有効なファイルじゃないよ..."
+    fi
+}
+
+# ========================================
+# カスタムコマンド（簡単に追加）
+# ========================================
+if [[ -f ~/.sish/commands.zsh ]]; then
+    source ~/.sish/commands.zsh
+fi
+if [[ -d ~/.sish/commands.d ]]; then
+    for f in ~/.sish/commands.d/*.zsh(N); do
+        source "$f"
+    done
+fi
+
+# ========================================
+# ウェルカムメッセージ
+# ========================================
+echo "🌸 Sishへようこそ！お兄ちゃん！"
+echo "💡 sish-config で設定メニューを開けるよ！"
+echo ""

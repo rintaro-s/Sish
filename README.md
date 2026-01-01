@@ -7,10 +7,14 @@
 ## 即座に使う
 
 ```bash
-cd /home/rinta/Documents/github/Sish
+cd Sish
 
 # 方法1: 起動スクリプト（推奨）
 ./sish
+
+# 方法2: 壁紙が使えて、自動でSishを使えるGUI
+cd Sish-Console
+cargo run
 ```
 
 

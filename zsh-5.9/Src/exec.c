@@ -620,6 +620,37 @@ commandnotfound(char *arg0, LinkList args)
     Shfunc shf = (Shfunc)
 	shfunctab->getnode(shfunctab, "command_not_found_handler");
 
+    /*
+     * Sish: store the original argv (excluding arg0) so `y` can
+     * re-run the suggestion with the same arguments.
+     * Example: `hit clone` -> suggestion `git` -> `git clone`.
+     *
+     * We use parent PID because the message may originate from a forked child.
+     */
+    {
+	char path[128];
+	pid_t ppid = getppid();
+	LinkNode node;
+	FILE *fp;
+
+	snprintf(path, sizeof(path), "/tmp/sish-last-args-%ld", (long)ppid);
+
+	/* args includes arg0 at the head */
+	if (!args || !firstnode(args) || !nextnode(firstnode(args))) {
+	    unlink(path);
+	} else if ((fp = fopen(path, "w")) != NULL) {
+	    for (node = nextnode(firstnode(args)); node; incnode(node)) {
+		char *a = (char *)getdata(node);
+		char *u = ztrdup(a);
+		unmetafy(u, NULL);
+		fputs(u, fp);
+		fputc('\n', fp);
+		zsfree(u);
+	    }
+	    fclose(fp);
+	}
+    }
+
     if (!shf) {
 	/* Sish: C側で未定義コマンドを可愛く案内する */
 	lastval = 127;

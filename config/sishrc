@@ -10,7 +10,9 @@ PROMPT='%F{213}Sish%f:%F{111}%~%f %# '
 # 基本設定
 # ========================================
 setopt AUTO_CD              # ディレクトリ名だけで移動
-setopt CORRECT              # コマンド訂正
+unsetopt CORRECT            # コマンド訂正（Sishの提案と競合するので無効）
+unsetopt CORRECTALL
+setopt NOCORRECT
 setopt HIST_IGNORE_DUPS     # 重複履歴を無視
 setopt SHARE_HISTORY        # 履歴を共有
 
@@ -54,6 +56,7 @@ alias ipy='ipython'
 # 未定義コマンド提案を即実行（次の行で y と打つ）
 y() {
     local f="/tmp/sish-last-suggestion-$$"
+    local af="/tmp/sish-last-args-$$"
     local sug=""
     if [[ -r "$f" ]]; then
         sug="$(< "$f")"
@@ -63,8 +66,39 @@ y() {
     fi
 
     if [[ -n "$sug" ]]; then
-        local cmd="${sug%% *}"
-        command -- "$cmd" "$@"
+        local -a words
+        words=( ${(z)sug} )
+        if (( ${#words} == 0 )); then
+            print -r -- "Sish：お兄ちゃん、候補が空っぽだった…"
+            return 1
+        fi
+
+        # 候補がコマンド名だけなら、元コマンドの引数を引き継ぐ
+        # 例: `hit clone` -> 候補 `git` -> `git clone`
+        if (( ${#words} == 1 )) && (( $# == 0 )); then
+            if [[ -r "$af" ]]; then
+                local -a saved_args
+                saved_args=( ${(f)"$(< "$af")"} )
+                rm -f "$af" 2>/dev/null || true
+                if (( ${#saved_args} )); then
+                    command "${words[@]}" "${saved_args[@]}"
+                    return $?
+                fi
+            fi
+
+            local prev
+            prev="$(fc -ln -2 -2 2>/dev/null || true)"
+            if [[ -n "$prev" ]]; then
+                local -a prev_words
+                prev_words=( ${(z)prev} )
+                if (( ${#prev_words} >= 2 )); then
+                    command "${words[@]}" "${prev_words[@]:1}"
+                    return $?
+                fi
+            fi
+        fi
+
+        command "${words[@]}" "$@"
     else
         print -r -- "Sish：お兄ちゃん、いま実行できる候補が無いよ…"
         return 1

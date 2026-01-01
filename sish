@@ -24,7 +24,9 @@ cat > "$DOTDIR/.zshrc" << 'EOFRC'
 # Sish temporary .zshrc (isolated via ZDOTDIR)
 
 setopt AUTO_CD
-setopt CORRECT
+unsetopt CORRECT
+unsetopt CORRECTALL
+setopt NOCORRECT
 setopt HIST_IGNORE_DUPS
 setopt SHARE_HISTORY
 
@@ -41,6 +43,7 @@ compinit -d ~/.sish_compdump 2>/dev/null || true
 # 未定義コマンド提案を即実行
 y() {
     local f="/tmp/sish-last-suggestion-$$"
+    local af="/tmp/sish-last-args-$$"
     local sug=""
     if [[ -r "$f" ]]; then
         sug="$(< "$f")"
@@ -50,12 +53,103 @@ y() {
     fi
 
     if [[ -n "$sug" ]]; then
-        local cmd="${sug%% *}"
-        command -- "$cmd" "$@"
+        local -a words
+        # Split like a shell command line, without evaluating it.
+        words=( ${(z)sug} )
+        if (( ${#words} == 0 )); then
+            print -r -- "Sish：お兄ちゃん、候補が空っぽだった…"
+            return 1
+        fi
+
+        # If suggestion is only a command name, inherit args from the original command.
+        # Example: `hit clone` -> suggestion `git` -> run `git clone`.
+        if (( ${#words} == 1 )) && (( $# == 0 )); then
+            if [[ -r "$af" ]]; then
+                local -a saved_args
+                saved_args=( ${(f)"$(< "$af")"} )
+                rm -f "$af" 2>/dev/null || true
+                if (( ${#saved_args} )); then
+                    command "${words[@]}" "${saved_args[@]}"
+                    return $?
+                fi
+            fi
+
+            local prev
+            prev="$(fc -ln -2 -2 2>/dev/null || true)"
+            if [[ -n "$prev" ]]; then
+                local -a prev_words
+                prev_words=( ${(z)prev} )
+                if (( ${#prev_words} >= 2 )); then
+                    command "${words[@]}" "${prev_words[@]:1}"
+                    return $?
+                fi
+            fi
+        fi
+
+        command "${words[@]}" "$@"
     else
         print -r -- "Sish：お兄ちゃん、いま実行できる候補が無いよ…"
         return 1
     fi
+}
+
+# --- Path fixups for famous commands ---
+_sish_first_existing_candidate() {
+    setopt local_options NULL_GLOB NO_CASE_GLOB
+    local base="$1"
+    local -a cands
+    # Prefer exact-with-extension (README -> README.md etc), then prefix.
+    # Try current dir, then one and two levels up.
+    local -a prefixes
+    prefixes=("" "../" "../../")
+    local p
+    for p in "${prefixes[@]}"; do
+        cands=( ${p}${base}.* )
+        if (( ${#cands} == 0 )); then
+            cands=( ${p}${base}* )
+        fi
+        if (( ${#cands} )); then
+            print -r -- "${cands[1]}"
+            return 0
+        fi
+    done
+    if (( ${#cands} )); then
+        print -r -- "${cands[1]}"
+        return 0
+    fi
+    return 1
+}
+
+cat() {
+    local -a opts files
+    local a
+    for a in "$@"; do
+        if [[ "$a" == -* ]]; then
+            opts+=("$a")
+        else
+            files+=("$a")
+        fi
+    done
+
+    if (( ${#files} == 1 )) && [[ ! -e "${files[1]}" ]]; then
+        local cand
+        cand="$(_sish_first_existing_candidate "${files[1]}")" || {
+            command cat "$@"
+            return $?
+        }
+        # Suggest running the corrected path via `y`.
+        if (( ${#opts} )); then
+            SISH_LAST_SUGGESTION="cat ${(j: :)${(q)opts}} ${(q)cand}"
+        else
+            SISH_LAST_SUGGESTION="cat ${(q)cand}"
+        fi
+        # Use the same per-process temp file that `y` consumes, to avoid stale suggestions.
+        print -r -- "$SISH_LAST_SUGGESTION" >| "/tmp/sish-last-suggestion-$$" 2>/dev/null || true
+        print -r -- "Sish：お兄ちゃん！\"${files[1]}\" は無かったよ… \"$cand\" のこと？（yで実行）"
+        return 1
+    fi
+
+    command cat "$@"
 }
 
 # 便利コマンド（デフォルト）

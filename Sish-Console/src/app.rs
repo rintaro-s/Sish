@@ -504,10 +504,10 @@ fn add_new_tab(notebook: &Notebook, config: &Config) {
     gesture.connect_pressed(move |_, _, x, y| {
         if popover_holder_for_cb.borrow().is_none() {
             let menu = gio::Menu::new();
-            // These actions are defined on the window in register_actions().
-            menu.append(Some("コピー"), Some("win.copy"));
-            menu.append(Some("ペースト"), Some("win.paste"));
-            menu.append(Some("全選択"), Some("win.select-all"));
+            // These actions are defined on the application in register_actions().
+            menu.append(Some("コピー"), Some("app.copy"));
+            menu.append(Some("ペースト"), Some("app.paste"));
+            menu.append(Some("全選択"), Some("app.select-all"));
 
             let popover = gtk4::PopoverMenu::from_model(Some(&menu));
             popover.set_parent(&term_for_menu);

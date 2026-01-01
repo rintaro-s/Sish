@@ -38,23 +38,40 @@ Cloning into 'rintaro-s'...
 ### パスタイポも自動で修正実行
 
 ```bash
-$ cd github
-Sish：お兄ちゃん！"github"ってディレクトリが見つからないよ？ "GitHub"の間違いじゃない？
+Sish:~/Documents/github/Sish % cd Github
+Sish：お兄ちゃん！「Github」は無かったよ… 「GitHub」の間違いじゃない？
        それっぽいフォルダ: GitHub
        ヒント: パスを確認してね！
 
-# y を打つだけで自動的に cd GitHub が実行される
-$ y
-$ pwd
-/home/rinta/Documents/GitHub
+Sish:~/Documents/github/Sish % yy
+Sish：お兄ちゃん！"yy"って何？"hg"の間違いじゃない？
+       ほかにも: yum, ls, cd, cp
+
+Sish:~/Documents/github/Sish % y
+Sish:~/Documents/github/Sish/GitHub % 
+
+```
+
+### 自動大文字小文字修正
+
+```bash
+Sish:~/Documents/github/Sish % cd github 
+
+Sish:~/Documents/github/Sish/GitHub % cd ..
+
+Sish:~/Documents/github/Sish % mkdir github
+
+Sish:~/Documents/github/Sish % cd github
+
+Sish:~/Documents/github/Sish/github %
 ```
 
 ### 日本語エラーメッセージ
 
 ```bash
 
-$ echo $((10 / 0))
-Sish：ゼロで割ろうとしてるよ！
+Sish:~/Documents/github/Sish/GitHub % echo $((10 / 0)) 
+Sish：💡 ゼロで割ろうとしてるよ！                                                                                                    
        割る数は0以外にしてね！
 ```
 
@@ -90,18 +107,46 @@ void <path>            # rm -rf <path>
 fiat <cmd...>          # rootならそのまま実行 / それ以外はsudo
 gaze [path]            # ls -lahFt を見やすく
 lore <path>            # <path> を <path>.back にコピー
-node <hoge> [foo]      # hoge優先でcd（なければfoo）
 genesis <dir>          # git init + add . + commit "first commit"
 oracle <path...>      # chmod +x を実行
 ```
 
 ---
 
-## カスタムコマンドを簡単に追加
+## カスタムコマンド例
 
-- `~/.sish/commands.zsh` を作る
-- もしくは `~/.sish/commands.d/*.zsh` を置く
+```bash
+Sish:~/Documents/github/Sish/GitHub % summon https://github.com/rintaro-s/rintaro-s # git clone
+Cloning into 'rintaro-s'...
 
-起動時に自動で読み込みます。
+Sish:~/Documents/github/Sish/GitHub % gaze ./rintaro-s  #  ls -lahFt ./rintaro-s
+合計 16K
+drwxrwxr-x 8 rinta rinta 4.0K Jan  1 21:22 .git/
+drwxrwxr-x 3 rinta rinta 4.0K Jan  1 21:22 ./
+-rw-rw-r-- 1 rinta rinta 2.0K Jan  1 21:22 README.md
+drwxrwxr-x 3 rinta rinta 4.0K Jan  1 21:22 ../
+
+Sish:~/Documents/github/Sish/GitHub % cd rintaro-s 
+
+Sish:~/Documents/github/Sish/GitHub/rintaro-s % lore README.md  #バックアップファイル作成
+Sish:~/Documents/github/Sish/GitHub/rintaro-s % ls
+README.md  README.md.back
+Sish:~/Documents/github/Sish/GitHub/rintaro-s % gaze . #ls -lahFt .
+合計 20K
+drwxrwxr-x 3 rinta rinta 4.0K Jan  1 21:24 ./
+drwxrwxr-x 8 rinta rinta 4.0K Jan  1 21:22 .git/
+-rw-rw-r-- 1 rinta rinta 2.0K Jan  1 21:22 README.md
+-rw-rw-r-- 1 rinta rinta 2.0K Jan  1 21:22 README.md.back
+drwxrwxr-x 3 rinta rinta 4.0K Jan  1 21:22 ../
+
+Sish:~/Documents/github/Sish/GitHub/rintaro-s % void .git # rm -rf .git
+
+Sish:~/Documents/github/Sish/GitHub/rintaro-s % genesis . # git init + add . + commit "first commit"
+Initialized empty Git repository in /home/rinta/Documents/github/Sish/GitHub/rintaro-s/.git/
+[master (root-commit) ea82b91] first commit
+ 2 files changed, 40 insertions(+)
+ create mode 100644 README.md
+ create mode 100644 README.md.back
+
 
 ---

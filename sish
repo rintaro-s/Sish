@@ -47,28 +47,81 @@ cd_with_correction() {
     # cdが失敗した場合、補正候補を探す
     local target="$1"
     if [[ -n "$target" && "$target" != -* ]]; then
+        # パスにスラッシュが含まれる場合（例: zsh-/Doc, zsh-5.6/Doc）
+        if [[ "$target" == */* ]]; then
+            local first_part="${target%%/*}"    # 最初の部分（例: zsh-）
+            local rest_part="${target#*/}"      # 残りの部分（例: Doc）
+            
+            local -a first_candidates=()
+            local dir
+            for dir in "$PWD"/*; do
+                if [[ -d "$dir" ]]; then
+                    local dirname="${dir##*/}"
+                    local first_lower="${first_part:l}"
+                    local dirname_lower="${dirname:l}"
+                    if [[ "$dirname" == "$first_part" ]] || \
+                       [[ "$dirname_lower" == "$first_lower" ]] || \
+                       [[ "$dirname_lower" == *"$first_lower"* ]] || \
+                       [[ "$first_lower" == *"$dirname_lower"* ]] || \
+                       [[ "$dirname_lower" =~ ^"$first_lower" ]] || \
+                       [[ "$dirname_lower" =~ "$first_lower"$ ]]; then
+                        first_candidates+=("$dir")
+                    fi
+                fi
+            done
+            
+            # 最初の部分の候補が見つかった場合、残りのパスと結合
+            if (( ${#first_candidates} >= 1 )); then
+                local -a full_candidates=()
+                for base in "${first_candidates[@]}"; do
+                    local full_path="$base/$rest_part"
+                    if [[ -d "$full_path" ]]; then
+                        full_candidates+=("$full_path")
+                    fi
+                done
+                
+                if (( ${#full_candidates} == 1 )); then
+                    echo "${full_candidates[1]}" > "/tmp/sish-last-dir-$$"
+                    builtin cd "${full_candidates[1]}"
+                    return $?
+                elif (( ${#full_candidates} > 1 )); then
+                    local cand="${full_candidates[1]}"
+                    echo "$cand" > "/tmp/sish-last-dir-$$"
+                    print -r -- "Sish：お兄ちゃん！「$target」は無かったよ… もしかして「${cand#$PWD/}」のこと？"
+                    return 1
+                fi
+            fi
+        fi
+        
+        # 通常のパス（スラッシュなし）
         local -a candidates=()
         local dir
         for dir in "$PWD"/*; do
             if [[ -d "$dir" ]]; then
                 local dirname="${dir##*/}"
-                # 簡易マッチ: 含まれるか、または大文字小文字違いでマッチ
-                if [[ "$dirname" == "$target" ]] || [[ "${dirname:l}" == "${target:l}" ]]; then
+                local target_lower="${target:l}"
+                local dirname_lower="${dirname:l}"
+                if [[ "$dirname" == "$target" ]] || \
+                   [[ "$dirname_lower" == "$target_lower" ]] || \
+                   [[ "$dirname_lower" == *"$target_lower"* ]] || \
+                   [[ "$target_lower" == *"$dirname_lower"* ]] || \
+                   [[ "$dirname_lower" =~ ^"$target_lower" ]] || \
+                   [[ "$dirname_lower" =~ "$target_lower"$ ]]; then
                     candidates+=("$dir")
                 fi
             fi
         done
         
         if (( ${#candidates} == 1 )); then
-            # 唯一の補正候補があれば、フラグを保存して親の y に任せる
-            echo "${candidates[0]}" > "/tmp/sish-last-dir-$$"
-            builtin cd "${candidates[0]}"
+            echo "${candidates[1]}" > "/tmp/sish-last-dir-$$"
+            builtin cd "${candidates[1]}"
             return $?
         elif (( ${#candidates} > 1 )); then
-            # 複数の候補がある場合は、最初の候補を提案
-            local cand="${candidates[1]##*/}"
-            echo "cd $cand" > "/tmp/sish-last-suggestion-$$" 2>/dev/null || true
-            print -r -- "Sish：お兄ちゃん！「$target」は無かったよ… もしかして「$cand」のこと？"
+            local cand="${candidates[1]}"
+            echo "$cand" > "/tmp/sish-last-dir-$$"
+            print -r -- "Sish：お兄ちゃん！「$target」は無かったよ… 「${cand##*/}」の間違いじゃない？"
+            print -r -- "       それっぽいフォルダ: ${cand##*/}"
+            print -r -- "       ヒント: パスを確認してね！"
             return 1
         fi
     fi

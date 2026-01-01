@@ -34,11 +34,45 @@ HISTFILE=~/.sish_history
 HISTSIZE=10000
 SAVEHIST=10000
 
-PROMPT='%F{213}🌸 Sish%f:%F{111}%~%f %# '
+PROMPT='%F{213}Sish%f:%F{111}%~%f %# '
 
 # 補完（Tab）
 autoload -Uz compinit
 compinit -d ~/.sish_compdump 2>/dev/null || true
+
+# cd補正フック: ディレクトリが見つからないときに補正候補を保存
+cd_with_correction() {
+    builtin cd "$@" 2>/dev/null && return 0
+    
+    # cdが失敗した場合、補正候補を探す
+    local target="$1"
+    if [[ -n "$target" && "$target" != -* ]]; then
+        local -a candidates=()
+        local dir
+        for dir in "$PWD"/*; do
+            if [[ -d "$dir" ]]; then
+                local dirname="${dir##*/}"
+                # 簡易マッチ: 含まれるか、または大文字小文字違いでマッチ
+                if [[ "$dirname" == "$target" ]] || [[ "${dirname:l}" == "${target:l}" ]]; then
+                    candidates+=("$dir")
+                fi
+            fi
+        done
+        
+        if (( ${#candidates} == 1 )); then
+            # 唯一の補正候補があれば、フラグを保存して親の y に任せる
+            echo "${candidates[0]}" > "/tmp/sish-last-dir-$$"
+            builtin cd "${candidates[0]}"
+            return $?
+        fi
+    fi
+    
+    # 補正できなかった場合は元のエラーで返す
+    builtin cd "$@"
+    return $?
+}
+
+alias cd='cd_with_correction'
 
 # 未定義コマンド提案を即実行
 y() {

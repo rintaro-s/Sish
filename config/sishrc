@@ -57,6 +57,7 @@ alias ipy='ipython'
 y() {
     local f="/tmp/sish-last-suggestion-$$"
     local af="/tmp/sish-last-args-$$"
+    local df="/tmp/sish-last-dir-$$"  # ディレクトリ補正用
     local sug=""
     if [[ -r "$f" ]]; then
         sug="$(< "$f")"
@@ -66,6 +67,16 @@ y() {
     fi
 
     if [[ -n "$sug" ]]; then
+        # パスタイポ補正（ディレクトリ存在フラグがあれば cd を実行）
+        if [[ -r "$df" ]]; then
+            local target_dir="$(< "$df")"
+            rm -f "$df" 2>/dev/null || true
+            if [[ -d "$target_dir" ]]; then
+                builtin cd -- "$target_dir"
+                return $?
+            fi
+        fi
+
         local -a words
         words=( ${(z)sug} )
         if (( ${#words} == 0 )); then
@@ -140,8 +151,9 @@ lore() {
 }
 
 node() {
+    # node: first priority (or second if first doesn't exist)
     if [[ $# -lt 1 ]]; then
-        print -r -- "Sish：nodeは2つの候補ディレクトリを渡してね！（例: node hoge foo）"
+        print -r -- "Sish：nodeは最低1つ指定してね！（例: node hoge）"
         return 2
     fi
     if [[ -d "$1" ]]; then
@@ -152,8 +164,30 @@ node() {
         builtin cd -- "$2"
         return $?
     fi
-    print -r -- "Sish：お兄ちゃん、どっちもフォルダじゃなかった…"
+    print -r -- "Sish：お兄ちゃん、指定したフォルダが見つからないよ…"
     return 1
+}
+
+genesis() {
+    # git init + add + commit "first commit"
+    if [[ $# -eq 0 ]]; then
+        print -r -- "Sish：genesisはリポジトリ作成先を指定してね！（例: genesis myproject）"
+        return 2
+    fi
+    command mkdir -p -- "$1" || return 1
+    builtin cd -- "$1" || return 1
+    command git init || return 1
+    command git add . || return 1
+    command git commit -m "first commit" || return 1
+}
+
+oracle() {
+    # chmod +x for specified paths
+    if [[ $# -lt 1 ]]; then
+        print -r -- "Sish：oracleで実行権をつけたいパスを指定してね！（例: oracle script.sh）"
+        return 2
+    fi
+    command chmod +x -- "$@"
 }
 
 # ディレクトリ作成と移動
@@ -172,12 +206,12 @@ extract() {
             *.tar)       tar xf "$1"      ;;
             *.zip)       unzip "$1"       ;;
             *.Z)         uncompress "$1"  ;;
-            *)           echo "'$1' は解凍できないよ..." ;;
+            *)           print -r -- "Sish：'$1' は解凍できないよ…" ;;
         esac
     else
-        echo "'$1' は有効なファイルじゃないよ..."
+        print -r -- "Sish：'$1' は有効なファイルじゃないよ…"
     fi
-}
+
 
 # ========================================
 # カスタムコマンド（簡単に追加）
@@ -194,6 +228,6 @@ fi
 # ========================================
 # ウェルカムメッセージ
 # ========================================
-echo "🌸 Sishへようこそ！お兄ちゃん！"
-echo "💡 sish-config で設定メニューを開けるよ！"
+echo "Sishへようこそ！お兄ちゃん！"
+echo "sish-config で設定メニューを開けるよ！"
 echo ""

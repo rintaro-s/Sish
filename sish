@@ -40,7 +40,7 @@ PROMPT='%F{213}Sish%f:%F{111}%~%f %# '
 autoload -Uz compinit
 compinit -d ~/.sish_compdump 2>/dev/null || true
 
-# cd補正フック: ディレクトリが見つからないときに補正候補を保存
+# cd補正フック: ディレクトリが見つからないときに補正候補を表示
 cd_with_correction() {
     builtin cd "$@" 2>/dev/null && return 0
     
@@ -64,6 +64,12 @@ cd_with_correction() {
             echo "${candidates[0]}" > "/tmp/sish-last-dir-$$"
             builtin cd "${candidates[0]}"
             return $?
+        elif (( ${#candidates} > 1 )); then
+            # 複数の候補がある場合は、最初の候補を提案
+            local cand="${candidates[1]##*/}"
+            echo "cd $cand" > "/tmp/sish-last-suggestion-$$" 2>/dev/null || true
+            print -r -- "Sish：お兄ちゃん！「$target」は無かったよ… もしかして「$cand」のこと？"
+            return 1
         fi
     fi
     
@@ -78,7 +84,19 @@ alias cd='cd_with_correction'
 y() {
     local f="/tmp/sish-last-suggestion-$$"
     local af="/tmp/sish-last-args-$$"
+    local df="/tmp/sish-last-dir-$$"  # ディレクトリ補正用
     local sug=""
+    
+    # パスタイポ補正フラグを優先チェック（ディレクトリ補正）
+    if [[ -r "$df" ]]; then
+        local target_dir="$(< "$df")"
+        rm -f "$df" 2>/dev/null || true
+        if [[ -d "$target_dir" ]]; then
+            builtin cd -- "$target_dir"
+            return $?
+        fi
+    fi
+    
     if [[ -r "$f" ]]; then
         sug="$(< "$f")"
         rm -f "$f" 2>/dev/null || true
@@ -179,7 +197,7 @@ cat() {
         fi
         # Use the same per-process temp file that `y` consumes, to avoid stale suggestions.
         print -r -- "$SISH_LAST_SUGGESTION" >| "/tmp/sish-last-suggestion-$$" 2>/dev/null || true
-        print -r -- "Sish：お兄ちゃん！\"${files[1]}\" は無かったよ… \"$cand\" のこと？（yで実行）"
+        print -r -- "Sish：お兄ちゃん！\"${files[1]}\" は無かったよ… もしかして\"$cand\" のこと？"
         return 1
     fi
 

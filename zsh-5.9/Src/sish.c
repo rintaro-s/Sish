@@ -18,6 +18,349 @@
 extern char **path;
 
 /* ========================================
+ * Current Personality/Tone Setting
+ * ======================================== */
+
+static SishTone current_tone = SISH_TONE_STANDARD;
+static int tone_initialized = 0;
+
+/* ========================================
+ * Runtime Configuration Cache
+ * ======================================== */
+
+static int sish_cfg_initialized = 0;
+static int sish_cfg_error_verbosity = 1;
+
+static int sish_cfg_gui_enable = 1;
+static int sish_cfg_gui_autostart = 0;
+static int sish_cfg_gui_expression_sync = 1;
+static char sish_cfg_gui_socket_path[256] = SISH_SOCKET_PATH;
+
+static int sish_cfg_completion_enable = 1;
+static int sish_cfg_completion_fuzzy = 1;
+static int sish_cfg_completion_dir_similarity = 1;
+static int sish_cfg_completion_history = 1;
+static int sish_cfg_completion_max_candidates = 5;
+
+static int sish_cfg_llm_enable = 0;
+static char sish_cfg_llm_endpoint[256] = "";
+static char sish_cfg_llm_model[128] = "";
+static int sish_cfg_llm_max_tokens = 2000;
+
+static char sish_cfg_character_name[64] = SISH_NAME;
+static char sish_cfg_theme[16] = "pink";
+
+static const char *sish_cfg_color_char = SISH_COLOR_PINK;
+static const char *sish_cfg_color_cmd = SISH_COLOR_CYAN;
+static const char *sish_cfg_color_error = SISH_COLOR_RED;
+static const char *sish_cfg_color_suggest = SISH_COLOR_GREEN;
+static const char *sish_cfg_color_hint = SISH_COLOR_YELLOW;
+
+static void
+sish_copy_bounded(char *dst, size_t dstsize, const char *src)
+{
+    if (!dst || dstsize == 0) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    strncpy(dst, src, dstsize);
+    dst[dstsize - 1] = '\0';
+}
+
+static int
+sish_env_int(const char *key, int def, int minv, int maxv)
+{
+    const char *v = getenv(key);
+    if (!v || !*v) return def;
+    char *end = NULL;
+    long n = strtol(v, &end, 10);
+    if (end == v) return def;
+    if (n < minv) n = minv;
+    if (n > maxv) n = maxv;
+    return (int)n;
+}
+
+static void
+sish_config_init_once(void)
+{
+    if (sish_cfg_initialized) return;
+    sish_cfg_initialized = 1;
+
+    /* Theme + colors */
+    const char *theme = getenv("SISH_THEME");
+    if (theme && *theme) sish_copy_bounded(sish_cfg_theme, sizeof(sish_cfg_theme), theme);
+
+    if (!strcmp(sish_cfg_theme, "blue")) {
+        sish_cfg_color_char = SISH_COLOR_BLUE;
+    } else if (!strcmp(sish_cfg_theme, "green")) {
+        sish_cfg_color_char = SISH_COLOR_GREEN;
+    } else if (!strcmp(sish_cfg_theme, "purple")) {
+        sish_cfg_color_char = SISH_COLOR_MAGENTA;
+    } else if (!strcmp(sish_cfg_theme, "orange")) {
+        sish_cfg_color_char = SISH_COLOR_ORANGE;
+    } else if (!strcmp(sish_cfg_theme, "rainbow")) {
+        /* 最低限: 見た目が変わるようにシアン寄せ */
+        sish_cfg_color_char = SISH_COLOR_CYAN;
+    } else {
+        sish_cfg_color_char = SISH_COLOR_PINK;
+    }
+
+    /* Character */
+    const char *cname = getenv("SISH_CHAR_NAME");
+    if (cname && *cname) sish_copy_bounded(sish_cfg_character_name, sizeof(sish_cfg_character_name), cname);
+
+    /* Error verbosity */
+    sish_cfg_error_verbosity = sish_env_int("SISH_ERROR_VERBOSITY", 1, 1, 4);
+
+    /* GUI */
+    sish_cfg_gui_enable = sish_env_int("SISH_GUI_ENABLE", 1, 0, 1);
+    sish_cfg_gui_autostart = sish_env_int("SISH_GUI_AUTOSTART", 0, 0, 1);
+    sish_cfg_gui_expression_sync = sish_env_int("SISH_GUI_EXPRESSION_SYNC", 1, 0, 1);
+    const char *sock = getenv("SISH_GUI_SOCKET_PATH");
+    if (sock && *sock) sish_copy_bounded(sish_cfg_gui_socket_path, sizeof(sish_cfg_gui_socket_path), sock);
+
+    /* Completion */
+    sish_cfg_completion_enable = sish_env_int("SISH_COMPLETION_ENABLE", 1, 0, 1);
+    sish_cfg_completion_fuzzy = sish_env_int("SISH_COMPLETION_FUZZY", 1, 0, 1);
+    sish_cfg_completion_dir_similarity = sish_env_int("SISH_COMPLETION_DIR_SIMILARITY", 1, 0, 1);
+    sish_cfg_completion_history = sish_env_int("SISH_COMPLETION_HISTORY", 1, 0, 1);
+    sish_cfg_completion_max_candidates = sish_env_int("SISH_COMPLETION_MAX_CANDIDATES", 5, 1, 1000);
+
+    /* LLM */
+    sish_cfg_llm_enable = sish_env_int("SISH_LLM_ENABLE", 0, 0, 1);
+    const char *ep = getenv("SISH_LLM_ENDPOINT");
+    if (ep && *ep) sish_copy_bounded(sish_cfg_llm_endpoint, sizeof(sish_cfg_llm_endpoint), ep);
+    const char *model = getenv("SISH_LLM_MODEL");
+    if (model && *model) sish_copy_bounded(sish_cfg_llm_model, sizeof(sish_cfg_llm_model), model);
+    sish_cfg_llm_max_tokens = sish_env_int("SISH_LLM_MAX_TOKENS", 2000, 1, 200000);
+}
+
+/**/
+const char *
+sish_character_name(void)
+{
+    sish_config_init_once();
+    return sish_cfg_character_name[0] ? sish_cfg_character_name : SISH_NAME;
+}
+
+/**/
+int
+sish_error_verbosity(void)
+{
+    sish_config_init_once();
+    return sish_cfg_error_verbosity;
+}
+
+/**/
+int
+sish_gui_enabled(void)
+{
+    sish_config_init_once();
+    return sish_cfg_gui_enable;
+}
+
+/**/
+int
+sish_gui_autostart(void)
+{
+    sish_config_init_once();
+    return sish_cfg_gui_autostart;
+}
+
+/**/
+int
+sish_gui_expression_sync(void)
+{
+    sish_config_init_once();
+    return sish_cfg_gui_expression_sync;
+}
+
+/**/
+const char *
+sish_gui_socket_path(void)
+{
+    sish_config_init_once();
+    return sish_cfg_gui_socket_path[0] ? sish_cfg_gui_socket_path : SISH_SOCKET_PATH;
+}
+
+/**/
+int
+sish_completion_enabled(void)
+{
+    sish_config_init_once();
+    return sish_cfg_completion_enable;
+}
+
+/**/
+int
+sish_completion_fuzzy(void)
+{
+    sish_config_init_once();
+    return sish_cfg_completion_fuzzy;
+}
+
+/**/
+int
+sish_completion_dir_similarity(void)
+{
+    sish_config_init_once();
+    return sish_cfg_completion_dir_similarity;
+}
+
+/**/
+int
+sish_completion_history(void)
+{
+    sish_config_init_once();
+    return sish_cfg_completion_history;
+}
+
+/**/
+int
+sish_completion_max_candidates(void)
+{
+    sish_config_init_once();
+    return sish_cfg_completion_max_candidates;
+}
+
+/**/
+int
+sish_llm_enabled_setting(void)
+{
+    sish_config_init_once();
+    return sish_cfg_llm_enable && sish_cfg_llm_endpoint[0];
+}
+
+/**/
+const char *
+sish_llm_endpoint_setting(void)
+{
+    sish_config_init_once();
+    return sish_cfg_llm_endpoint;
+}
+
+/**/
+const char *
+sish_llm_model_setting(void)
+{
+    sish_config_init_once();
+    return sish_cfg_llm_model;
+}
+
+/**/
+int
+sish_llm_max_tokens_setting(void)
+{
+    sish_config_init_once();
+    return sish_cfg_llm_max_tokens;
+}
+
+/**/
+const char *
+sish_color_char(void)
+{
+    sish_config_init_once();
+    return sish_cfg_color_char;
+}
+
+/**/
+const char *
+sish_color_cmd(void)
+{
+    sish_config_init_once();
+    return sish_cfg_color_cmd;
+}
+
+/**/
+const char *
+sish_color_error(void)
+{
+    sish_config_init_once();
+    return sish_cfg_color_error;
+}
+
+/**/
+const char *
+sish_color_suggest(void)
+{
+    sish_config_init_once();
+    return sish_cfg_color_suggest;
+}
+
+/**/
+const char *
+sish_color_hint(void)
+{
+    sish_config_init_once();
+    return sish_cfg_color_hint;
+}
+
+static void
+sish_init_tone_from_env_once(void)
+{
+    if (tone_initialized) return;
+    tone_initialized = 1;
+
+    const char *env = getenv("SISH_TONE");
+    if (!env || !*env) return;
+
+    char *end = NULL;
+    long v = strtol(env, &end, 10);
+    if (end == env) return;
+    if (v < 0) v = 0;
+    if (v >= (long)SISH_TONE_COUNT) v = (long)SISH_TONE_COUNT - 1;
+    current_tone = (SishTone)v;
+}
+
+/* ========================================
+ * Tone-specific Message Templates
+ * ======================================== */
+
+/* メッセージ構造: prefix, main_message, hint */
+typedef struct {
+    const char *prefix;
+    const char *main_msg;
+    const char *hint;
+} ToneMessage;
+
+/* 各口調ごとのコマンド未検出メッセージ */
+static const ToneMessage tone_cmd_not_found[] = {
+    /* SISH_TONE_STANDARD */
+    {"お兄ちゃん！", "\"%s\"って無いよ…", "\"%s\"の間違いじゃない？"},
+    /* SISH_TONE_RELIABLE */
+    {"", "\"%s\" は存在しない。", "\"%s\" を実行する？"},
+    /* SISH_TONE_SWEET */
+    {"お兄ちゃん…", "\"%s\"って無いみたい…", "\"%s\"なら、あるよ…？"},
+    /* SISH_TONE_QUICK */
+    {"", "\"%s\" → \"%s\"。", "実行するね"},
+    /* SISH_TONE_TEACHER */
+    {"お兄ちゃん、", "\"%s\"はコマンドに無いよ", "\"%s\"はバージョン管理のコマンドだよ"},
+    /* SISH_TONE_EMOTIONLESS */
+    {"", "\"%s\" 不明。", "\"%s\" 提案。"},
+    /* SISH_TONE_YANDERE */
+    {"お兄ちゃん…", "\"%s\"なんて使わないで…", "\"%s\"だけ使って…絶対に…"}
+};
+
+/* 各口調ごとのファイル未検出メッセージ */
+static const ToneMessage tone_file_not_found[] = {
+    /* SISH_TONE_STANDARD */
+    {"お兄ちゃん！", "\"%s\"って無いよ…", "パスを確認してね！"},
+    /* SISH_TONE_RELIABLE */
+    {"", "\"%s\" は存在しない。", "パスを確認すること。"},
+    /* SISH_TONE_SWEET */
+    {"お兄ちゃん…", "\"%s\"って無いみたい…", "パス、間違ってない…？"},
+    /* SISH_TONE_QUICK */
+    {"", "\"%s\" 無し。", "確認して"},
+    /* SISH_TONE_TEACHER */
+    {"お兄ちゃん、", "\"%s\"というファイルは無いよ", "ファイルパスは絶対パスか相対パスで指定できるよ"},
+    /* SISH_TONE_EMOTIONLESS */
+    {"", "\"%s\" 不在。", ""},
+    /* SISH_TONE_YANDERE */
+    {"お兄ちゃん…", "\"%s\"なんて要らないよ…", "私だけ見て…"}
+};
+
+/* ========================================
  * Common Commands Database
  * ======================================== */
 
@@ -222,6 +565,47 @@ sish_levenshtein_distance(const char *s1, const char *s2)
 }
 
 /* ========================================
+ * Tone/Personality Management
+ * ======================================== */
+
+/**/
+void
+sish_set_tone(SishTone sish_tone)
+{
+    if (sish_tone >= 0 && sish_tone < SISH_TONE_COUNT) {
+        current_tone = sish_tone;
+        tone_initialized = 1;
+    }
+}
+
+/**/
+SishTone
+sish_get_tone(void)
+{
+    sish_init_tone_from_env_once();
+    return current_tone;
+}
+
+/**/
+const char *
+sish_tone_name(SishTone sish_tone)
+{
+    static const char *names[] = {
+        "標準妹モード",
+        "しっかり妹モード",
+        "甘え妹モード",
+        "せっかち妹モード",
+        "教え上手妹モード",
+        "無感情妹モード",
+        "ヤンデレ妹モード"
+    };
+    if (sish_tone >= 0 && sish_tone < SISH_TONE_COUNT) {
+        return names[sish_tone];
+    }
+    return "不明";
+}
+
+/* ========================================
  * Command Suggestion System
  * ======================================== */
 
@@ -390,6 +774,12 @@ fprintf(stderr, "%s       ヒント: 正しいコマンドを確認してね！%
     
     /* Send emotion to GUI if connected */
     sish_gui_send_emotion(tmpl->emotion);
+
+    /*
+     * exec失敗などで子プロセスが `_exit()` する経路があるため、
+     * ここでflushしておかないと stderr がパイプのときに出力が落ちる。
+     */
+    fflush(stderr);
 }
 
 /**/
@@ -415,7 +805,8 @@ int
 sish_console_is_running(void)
 {
     struct stat st;
-    return (stat(SISH_SOCKET_PATH, &st) == 0);
+    if (!sish_gui_enabled()) return 0;
+    return (stat(sish_gui_socket_path(), &st) == 0);
 }
 
 /**/
@@ -428,8 +819,16 @@ sish_gui_connect(void)
         return sish_gui_socket;
     }
     
+    if (!sish_gui_enabled()) return -1;
+
     if (!sish_console_is_running()) {
-        return -1;
+        if (sish_gui_autostart()) {
+            /* best-effort: sish-console がPATHにあれば起動 */
+            (void)system("sish-console >/dev/null 2>&1 &");
+            /* すぐにはソケットが出ないかもしれないので、少しだけ待つ */
+            usleep(150 * 1000);
+        }
+        if (!sish_console_is_running()) return -1;
     }
     
     sish_gui_socket = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -439,7 +838,7 @@ sish_gui_connect(void)
     
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, SISH_SOCKET_PATH, sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, sish_gui_socket_path(), sizeof(addr.sun_path) - 1);
     
     if (connect(sish_gui_socket, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         close(sish_gui_socket);
@@ -474,7 +873,7 @@ sish_gui_send_event(const char *event_type, const char *data)
         return -1;
     }
     
-    /* Format JSON message */
+    /* Format JSON message (data は厳密なJSONエスケープ未対応: 既存仕様維持) */
     snprintf(buffer, sizeof(buffer),
              "{\"type\":\"%s\",\"data\":\"%s\",\"timestamp\":%ld}",
              event_type, data ? data : "", (long)time(NULL));
@@ -492,6 +891,8 @@ sish_gui_send_emotion(SishEmotion emotion)
         "thinking", "excited", "sleepy", "neutral"
     };
     
+    if (!sish_gui_enabled()) return -1;
+    if (!sish_gui_expression_sync()) return 0;
     if (emotion >= 0 && emotion < 8) {
         return sish_gui_send_event("emotion", emotion_names[emotion]);
     }
@@ -537,28 +938,136 @@ sish_llm_configure(const char *endpoint)
     }
 }
 
+/* シンプルなHTTP POST用の構造体 */
+struct sish_http_response {
+    char *data;
+    size_t size;
+};
+
+static size_t
+sish_http_write_callback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    size_t realsize = size * nmemb;
+    struct sish_http_response *mem = (struct sish_http_response *)userp;
+    
+    char *ptr = realloc(mem->data, mem->size + realsize + 1);
+    if (!ptr) return 0;
+    
+    mem->data = ptr;
+    memcpy(&(mem->data[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->data[mem->size] = '\0';
+    
+    return realsize;
+}
+
 /**/
 int
 sish_llm_query(const char *prompt, char *response, size_t response_size)
 {
-    /* This is a placeholder for LLM integration
-     * In a real implementation, this would:
-     * 1. Connect to the LLM endpoint (e.g., LMStudio)
-     * 2. Send the prompt as a JSON request
-     * 3. Parse the response
-     * 4. Return the generated text
-     */
-    
-    if (!sish_llm_enabled || !prompt || !response) {
+    if (!sish_llm_enabled_setting()) {
+        if (response && response_size > 0) {
+            snprintf(response, response_size, "LLM統合が無効です。sish-config で有効にしてください。");
+        }
         return -1;
     }
     
-    /* For now, return a placeholder message */
-    snprintf(response, response_size,
-             "LLMへの接続は設定されていません。SISH_LLM_ENDPOINTを設定してください。");
+    const char *endpoint = sish_llm_endpoint_setting();
+    const char *model = sish_llm_model_setting();
+    int max_tokens = sish_llm_max_tokens_setting();
+    
+    if (!endpoint || !*endpoint) {
+        if (response && response_size > 0) {
+            snprintf(response, response_size, "SISH_LLM_ENDPOINTが設定されていません。");
+        }
+        return -1;
+    }
+    
+    if (!prompt || !response || response_size == 0) return -1;
+    
+    /* JSONペイロード構築（エスケープ簡略版） */
+    char json_payload[4096];
+    char escaped_prompt[2048];
+    const char *p = prompt;
+    char *ep = escaped_prompt;
+    while (*p && (ep - escaped_prompt < (int)sizeof(escaped_prompt) - 3)) {
+        if (*p == '"') {
+            *ep++ = '\\'; *ep++ = '"';
+        } else if (*p == '\\') {
+            *ep++ = '\\'; *ep++ = '\\';
+        } else if (*p == '\n') {
+            *ep++ = '\\'; *ep++ = 'n';
+        } else {
+            *ep++ = *p;
+        }
+        p++;
+    }
+    *ep = '\0';
+    
+    snprintf(json_payload, sizeof(json_payload),
+             "{\"model\": \"%s\", \"messages\": [{\"role\": \"user\", \"content\": \"%s\"}], \"max_tokens\": %d}",
+             model && *model ? model : "default", escaped_prompt, max_tokens);
+    
+    /* このプロセスで外部コマンド curl を使う簡易実装（libcurlを使うには追加ビルド設定が必要） */
+    /* 本格実装ではlibcurlを使うべきですが、今はcurlコマンドで代用 */
+    char cmd[8192];
+    char tmpfile[256];
+    snprintf(tmpfile, sizeof(tmpfile), "/tmp/sish_llm_response_%d.txt", (int)getpid());
+    snprintf(cmd, sizeof(cmd),
+             "curl -s -X POST '%s/v1/chat/completions' "
+             "-H 'Content-Type: application/json' "
+             "-d '%s' 2>/dev/null > '%s'",
+             endpoint, json_payload, tmpfile);
+    
+    int ret = system(cmd);
+    if (ret != 0) {
+        snprintf(response, response_size, "LLMへのリクエストに失敗しました（curl実行エラー）。");
+        (void)unlink(tmpfile);
+        return -1;
+    }
+    
+    FILE *fp = fopen(tmpfile, "r");
+    if (!fp) {
+        snprintf(response, response_size, "LLM応答ファイルが開けませんでした。");
+        (void)unlink(tmpfile);
+        return -1;
+    }
+    
+    /* 簡易JSON解析：choices[0].message.content を探す */
+    char line[2048];
+    int found = 0;
+    response[0] = '\0';
+    while (fgets(line, sizeof(line), fp)) {
+        /* "content":"..." の部分を抜き出す（超簡易） */
+        char *content_start = strstr(line, "\"content\":");
+        if (content_start) {
+            content_start += strlen("\"content\":");
+            while (*content_start && isspace((unsigned char)*content_start)) content_start++;
+            if (*content_start == '"') {
+                content_start++;
+                char *content_end = strchr(content_start, '"');
+                if (content_end) {
+                    size_t len = (size_t)(content_end - content_start);
+                    if (len >= response_size) len = response_size - 1;
+                    memcpy(response, content_start, len);
+                    response[len] = '\0';
+                    found = 1;
+                    break;
+                }
+            }
+        }
+    }
+    fclose(fp);
+    (void)unlink(tmpfile);
+    
+    if (!found) {
+        snprintf(response, response_size, "LLM応答の解析に失敗しました。");
+        return -1;
+    }
     
     return 0;
 }
+
 
 /* ========================================
  * Wrapper Functions for Zsh Integration
@@ -576,6 +1085,9 @@ sish_command_not_found(const char *cmd)
 {
     char **suggestions = NULL;
     int suggestion_count = 0;
+
+    /* Ensure tone is loaded from environment (for -c mode) */
+    (void)sish_get_tone();
 
     /* forkしても拾えるよう、親PID単位で提案を保存 */
     /* (prototype is static below) */
@@ -614,16 +1126,66 @@ sish_command_not_found(const char *cmd)
     if (suggestions && suggestion_count > 0 && suggestions[0]) {
         sish_store_last_suggestion(cmd, suggestions[0]);
 
-        /* 企画書の例に寄せたワンライナー */
+        /* 口調に応じたメッセージ */
+        const ToneMessage *tmsg = &tone_cmd_not_found[sish_get_tone()];
+        
         fprintf(stderr, "%s%s%s：%s", SISH_CHAR_COLOR, SISH_COLOR_BOLD,
                 SISH_CHARACTER_NAME, SISH_COLOR_RESET);
-        fprintf(stderr, "%sお兄ちゃん！%s", SISH_CHAR_COLOR, SISH_COLOR_RESET);
-        fprintf(stderr, "%s\"%s\"%sって何？%s\"%s\"%sの間違いじゃない？\n",
-                SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
-                SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+        
+        /* Prefix（呼びかけ）がある場合のみ出力 */
+        if (tmsg->prefix && strlen(tmsg->prefix) > 0) {
+            fprintf(stderr, "%s%s%s", SISH_CHAR_COLOR, tmsg->prefix, SISH_COLOR_RESET);
+        }
+        
+        /* ヒント・提案部分 */
+        if (current_tone == SISH_TONE_QUICK) {
+            /* せっかち妹：即実行形式 */
+            fprintf(stderr, "%s%s%s → %s%s%s。%s\n", 
+                    SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
+                    SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET, 
+                    tmsg->hint);
+        } else if (current_tone == SISH_TONE_EMOTIONLESS) {
+            /* 無感情妹：淡々と */
+            fprintf(stderr, "%s%s%s 不明。%s%s%s 提案。\n", 
+                    SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
+                    SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+        } else if (current_tone == SISH_TONE_YANDERE) {
+            /* ヤンデレ妹：決め打ち */
+            fprintf(stderr, "%s%s%sなんて使わないで…%s%s%sだけ使って…絶対に…\n",
+                    SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
+                    SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+        } else {
+            /* その他の口調：コマンド名から始める */
+            /* メインメッセージ */
+            fprintf(stderr, "%s%s%s", SISH_CMD_COLOR, cmd, SISH_COLOR_RESET);
+            
+            if (current_tone == SISH_TONE_RELIABLE) {
+                /* しっかり妹：断定的 */
+                fprintf(stderr, " は存在しない。%s%s%s を実行する？\n", 
+                        SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+            } else if (current_tone == SISH_TONE_SWEET) {
+                /* 甘え妹：弱気 */
+                fprintf(stderr, "って無いみたい…\n");
+                fprintf(stderr, "%s       %s%s%sなら、あるよ…？%s\n",
+                        SISH_HINT_COLOR, SISH_SUGGEST_COLOR, suggestions[0], 
+                        SISH_COLOR_RESET, SISH_COLOR_RESET);
+            } else if (current_tone == SISH_TONE_TEACHER) {
+                /* 教え上手妹：説明追加 */
+                fprintf(stderr, "はコマンドに無いよ\n");
+                fprintf(stderr, "%s       もしかして: %s%s%s\n",
+                        SISH_HINT_COLOR, SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+            } else {
+                /* 標準妹：デフォルト */
+                fprintf(stderr, "って無いよ…%s%s%sの間違いじゃない？\n",
+                        SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+            }
+        }
 
-        /* 他の候補もあれば併記 */
-        if (suggestion_count > 1) {
+        /* 他の候補もあれば併記（標準・教え上手・しっかり妹のみ） */
+        if (suggestion_count > 1 && 
+            (current_tone == SISH_TONE_STANDARD || 
+             current_tone == SISH_TONE_TEACHER ||
+             current_tone == SISH_TONE_RELIABLE)) {
             fprintf(stderr, "%s       ほかにも: %s", SISH_HINT_COLOR, SISH_COLOR_RESET);
             for (int i = 1; i < suggestion_count; i++) {
                 fprintf(stderr, "%s%s%s", SISH_SUGGEST_COLOR, suggestions[i], SISH_COLOR_RESET);
@@ -769,6 +1331,15 @@ mod_export void
 sish_file_not_found(const char *path)
 {
     sish_print_error(SISH_ERR_FILE_NOT_FOUND, path, path);
+
+    if (sish_completion_enabled()) {
+        char **suggestions = NULL;
+        int count = sish_complete_path(path, &suggestions);
+        if (count > 0) {
+            sish_show_completions(suggestions, count);
+        }
+        sish_free_completion_suggestions(suggestions, count);
+    }
 }
 
 /*
@@ -783,6 +1354,9 @@ sish_init(void)
     opts[CORRECT] = 0;
     opts[CORRECTALL] = 0;
     
+    /* Load tone setting from environment */
+    (void)sish_get_tone();
+    
     /* Try to connect to GUI console */
     if (sish_console_is_running()) {
         sish_gui_connect();
@@ -790,9 +1364,8 @@ sish_init(void)
     }
     
     /* Check for LLM endpoint in environment */
-    char *llm_endpoint = getenv("SISH_LLM_ENDPOINT");
-    if (llm_endpoint) {
-        sish_llm_configure(llm_endpoint);
+    if (sish_llm_enabled_setting() && sish_llm_endpoint_setting()) {
+        sish_llm_configure(sish_llm_endpoint_setting());
     }
 }
 

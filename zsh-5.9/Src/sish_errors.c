@@ -7,6 +7,127 @@
 #include "zsh.mdh"
 #include "sish.h"
 
+static const char *
+sish_error_lead(SishTone sish_tone)
+{
+    switch (sish_tone) {
+    case SISH_TONE_RELIABLE:
+        return "確認して。";
+    case SISH_TONE_SWEET:
+        return "お兄ちゃん…。";
+    case SISH_TONE_QUICK:
+        return "急いで直して。";
+    case SISH_TONE_TEACHER:
+        return "一緒に確認しよう。";
+    case SISH_TONE_EMOTIONLESS:
+        return "エラー。";
+    case SISH_TONE_YANDERE:
+        return "…ねえ。";
+    case SISH_TONE_STANDARD:
+    default:
+        return "お兄ちゃん、";
+    }
+}
+
+static const char *
+sish_hint_lead(SishTone sish_tone)
+{
+    switch (sish_tone) {
+    case SISH_TONE_RELIABLE:
+        return "ヒント: ";
+    case SISH_TONE_SWEET:
+        return "ねぇ…: ";
+    case SISH_TONE_QUICK:
+        return "ヒント: ";
+    case SISH_TONE_TEACHER:
+        return "ヒント: ";
+    case SISH_TONE_EMOTIONLESS:
+        return "ヒント: ";
+    case SISH_TONE_YANDERE:
+        return "…これ。";
+    case SISH_TONE_STANDARD:
+    default:
+        return "ヒント: ";
+    }
+}
+
+static void
+sish_template_format(char *dst, size_t dstsize, const char *tmpl, const char *arg_s, int arg_d, char arg_c)
+{
+    if (!dst || dstsize == 0) return;
+    dst[0] = '\0';
+    if (!tmpl) return;
+
+    size_t w = 0;
+    for (const char *p = tmpl; *p && w + 1 < dstsize; p++) {
+        if (*p != '%') {
+            dst[w++] = *p;
+            continue;
+        }
+        p++;
+        if (*p == '%') {
+            dst[w++] = '%';
+            continue;
+        }
+        if (*p == 's') {
+            const char *s = arg_s ? arg_s : "";
+            while (*s && w + 1 < dstsize) dst[w++] = *s++;
+            continue;
+        }
+        if (*p == 'd') {
+            char tmp[64];
+            snprintf(tmp, sizeof(tmp), "%d", arg_d);
+            for (const char *q = tmp; *q && w + 1 < dstsize; q++) dst[w++] = *q;
+            continue;
+        }
+        if (*p == 'c') {
+            if (w + 1 < dstsize) dst[w++] = arg_c;
+            continue;
+        }
+        /* 未知のフォーマットはそのまま */
+        if (w + 1 < dstsize) dst[w++] = '%';
+        if (*p && w + 1 < dstsize) dst[w++] = *p;
+    }
+    dst[w] = '\0';
+}
+
+static void
+sish_extract_subject(const char *msg, const char *pattern, char *out, size_t outsize)
+{
+    if (!out || outsize == 0) return;
+    out[0] = '\0';
+    if (!msg) return;
+
+    const char *p = NULL;
+    if (pattern) p = strstr(msg, pattern);
+    if (p) {
+        p += strlen(pattern);
+    } else {
+        p = msg;
+    }
+
+    /* よくある形式: "...: subject" */
+    const char *colon = strrchr(msg, ':');
+    if (colon && colon[1]) {
+        p = colon + 1;
+    }
+    while (*p && isspace((unsigned char)*p)) p++;
+
+    strncpy(out, p, outsize);
+    out[outsize - 1] = '\0';
+
+    /* 末尾の空白を落とす */
+    size_t len = strlen(out);
+    while (len > 0 && isspace((unsigned char)out[len - 1])) {
+        out[len - 1] = '\0';
+        len--;
+    }
+    if (out[0] == '\0') {
+        strncpy(out, msg, outsize);
+        out[outsize - 1] = '\0';
+    }
+}
+
 /* エラーメッセージの日本語変換テーブル */
 typedef struct {
     const char *pattern;       /* 英語メッセージのパターン */
@@ -100,25 +221,59 @@ mod_export char *
 sish_translate_error(const char *msg)
 {
     static char buf[1024];
-    const char *p, *q;
+    char ja[512];
+    char hint[512];
+    char subject[256];
+    const char *p;
     int i;
     
     if (!msg) return NULL;
+
+    SishTone sish_tone = sish_get_tone();
     
     /* パターンマッチング */
     for (i = 0; sish_error_map[i].pattern != NULL; i++) {
         p = strstr(msg, sish_error_map[i].pattern);
         if (p) {
-            /* マッチした場合、日本語に変換 */
-            snprintf(buf, sizeof(buf), "%s💡 %s%s%s",
-                    SISH_CHAR_COLOR,
-                    sish_error_map[i].japanese,
-                    SISH_COLOR_RESET,
-                    sish_error_map[i].hint ? "\n       " : "");
-            
+            sish_extract_subject(msg, sish_error_map[i].pattern, subject, sizeof(subject));
+
+            int id = 0;
+            /* メッセージ末尾に数字があるケース用（雑に拾う） */
+            for (const char *t = msg; *t; t++) {
+                if (isdigit((unsigned char)*t)) {
+                    id = atoi(t);
+                    break;
+                }
+            }
+            char ch = '?';
+            for (const char *t = msg; *t; t++) {
+                if (*t == '\'' && t[1] && t[2] == '\'') {
+                    ch = t[1];
+                    break;
+                }
+            }
+
+            sish_template_format(ja, sizeof(ja), sish_error_map[i].japanese, subject, id, ch);
             if (sish_error_map[i].hint) {
+                sish_template_format(hint, sizeof(hint), sish_error_map[i].hint, subject, id, ch);
+            } else {
+                hint[0] = '\0';
+            }
+
+            /* マッチした場合、日本語に変換 */
+            snprintf(buf, sizeof(buf), "%s%s%s %s%s%s",
+                    SISH_CHAR_COLOR,
+                    sish_error_lead(sish_tone),
+                    SISH_COLOR_RESET,
+                    SISH_CHAR_COLOR,
+                    ja,
+                    SISH_COLOR_RESET);
+            
+            if (hint[0]) {
+                strncat(buf, "\n       ", sizeof(buf) - strlen(buf) - 1);
                 strncat(buf, SISH_HINT_COLOR, sizeof(buf) - strlen(buf) - 1);
-                strncat(buf, sish_error_map[i].hint, sizeof(buf) - strlen(buf) - 1);
+                strncat(buf, sish_hint_lead(sish_tone), sizeof(buf) - strlen(buf) - 1);
+                strncat(buf, hint, sizeof(buf) - strlen(buf) - 1);
                 strncat(buf, SISH_COLOR_RESET, sizeof(buf) - strlen(buf) - 1);
             }
             
@@ -127,8 +282,8 @@ sish_translate_error(const char *msg)
     }
     
     /* マッチしない場合は一般的なメッセージ */
-    snprintf(buf, sizeof(buf), "%sなんかエラーが起きちゃった...%s\n       %s元のメッセージ: %s%s",
-            SISH_ERROR_COLOR, SISH_COLOR_RESET,
+        snprintf(buf, sizeof(buf), "%s%s%s\n       %s元のメッセージ: %s%s",
+            SISH_ERROR_COLOR, sish_error_lead(sish_tone), SISH_COLOR_RESET,
             SISH_HINT_COLOR, msg, SISH_COLOR_RESET);
     return buf;
 }
@@ -136,11 +291,55 @@ sish_translate_error(const char *msg)
 /*
  * zerrの日本語ラッパー - 全てのエラーをSish化
  */
+
+static char *
+sish_format_zsh_error(const char *fmt, va_list ap)
+{
+    FILE *fp;
+    char *buf;
+    long len;
+
+    fp = tmpfile();
+    if (!fp) {
+        return ztrdup("");
+    }
+
+    /* zshの独自フォーマット（%e/%zなど）を解釈できるのは zerrmsg */
+    zerrmsg(fp, fmt ? fmt : "", ap);
+    fflush(fp);
+
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return ztrdup("");
+    }
+    len = ftell(fp);
+    if (len < 0) {
+        fclose(fp);
+        return ztrdup("");
+    }
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return ztrdup("");
+    }
+
+    buf = (char *)zalloc((size_t)len + 1);
+    if (!buf) {
+        fclose(fp);
+        return ztrdup("");
+    }
+
+    if (len > 0) {
+        (void)fread(buf, 1, (size_t)len, fp);
+    }
+    buf[len] = '\0';
+    fclose(fp);
+    return buf;
+}
 mod_export void
 sish_zerr(const char *fmt, ...)
 {
     va_list ap;
-    char buf[1024];
+    char *raw;
     char *translated;
     
     if (errflag || noerrs) {
@@ -150,18 +349,20 @@ sish_zerr(const char *fmt, ...)
     }
     errflag |= ERRFLAG_ERROR;
     
-    /* フォーマット文字列を処理 */
+    /* フォーマット文字列を処理（zsh独自の %e/%z 等に対応） */
     VA_START(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
+    raw = sish_format_zsh_error(fmt, ap);
     va_end(ap);
-    
+
     /* 日本語に変換 */
-    translated = sish_translate_error(buf);
+    translated = sish_translate_error(raw);
+    zsfree(raw);
     
     /* キャラクター付きで出力 */
     fprintf(stderr, "%s%sSish%s：", 
             SISH_CHAR_COLOR, SISH_COLOR_BOLD, SISH_COLOR_RESET);
     fprintf(stderr, "%s\n", translated);
+        fflush(stderr);
     
     /* GUIに通知 */
     sish_gui_send_emotion(SISH_EMOTION_SAD);
@@ -174,25 +375,27 @@ mod_export void
 sish_zerrnam(const char *cmd, const char *fmt, ...)
 {
     va_list ap;
-    char buf[1024];
+    char *raw;
     char *translated;
     
     if (errflag || noerrs)
         return;
     errflag |= ERRFLAG_ERROR;
     
-    /* フォーマット文字列を処理 */
+    /* フォーマット文字列を処理（zsh独自の %e/%z 等に対応） */
     VA_START(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
+    raw = sish_format_zsh_error(fmt, ap);
     va_end(ap);
-    
+
     /* 日本語に変換 */
-    translated = sish_translate_error(buf);
+    translated = sish_translate_error(raw);
+    zsfree(raw);
     
     /* コマンド名付きで出力 */
     fprintf(stderr, "%s%s%s%s：", 
             SISH_CMD_COLOR, cmd, SISH_COLOR_RESET, SISH_CHAR_COLOR);
     fprintf(stderr, "%s\n", translated);
+        fflush(stderr);
     
     /* GUIに通知 */
     sish_gui_send_emotion(SISH_EMOTION_CONFUSED);

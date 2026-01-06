@@ -1,1 +1,4 @@
 Sish-Console/target/debug/
+.venv/
+__pycache__/
+marian-en-jap-ct2/

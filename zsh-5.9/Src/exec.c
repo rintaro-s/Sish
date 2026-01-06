@@ -780,8 +780,12 @@ execute(LinkList args, int flags, int defpath)
 	    if (arg0 == s || unset(PATHDIRS) ||
 		(arg0[0] == '.' && (arg0 + 1 == s ||
 				    (arg0[1] == '.' && arg0 + 2 == s)))) {
-		sish_zerr("%e: %s", lerrno, arg0);
-		_exit((lerrno == EACCES || lerrno == ENOEXEC) ? 126 : 127);
+			/* Sish: パス付き実行の失敗も統一ハンドリング（設定反映のため） */
+			if (lerrno == EACCES)
+			    sish_permission_denied(arg0);
+			else
+			    sish_file_not_found(arg0);
+			_exit((lerrno == EACCES || lerrno == ENOEXEC) ? 126 : 127);
 	    }
 	    break;
 	}

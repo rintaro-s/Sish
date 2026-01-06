@@ -3,12 +3,24 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-SISH_PATH="/tmp/sish-test/bin/zsh"
+DEFAULT_INSTALLED_SISH_PATH="/tmp/sish-test/bin/zsh"
+DEFAULT_BUILT_SISH_PATH="$SCRIPT_DIR/zsh-5.9/Src/zsh"
+
+# Allow overriding the zsh binary path.
+# Prefer an explicit env var, then in-repo build artifact, then the historical /tmp install path.
+SISH_PATH="${SISH_PATH:-}"
+if [[ -z "$SISH_PATH" ]]; then
+    if [[ -x "$DEFAULT_BUILT_SISH_PATH" ]]; then
+        SISH_PATH="$DEFAULT_BUILT_SISH_PATH"
+    else
+        SISH_PATH="$DEFAULT_INSTALLED_SISH_PATH"
+    fi
+fi
 SISH_CONFIG="$SCRIPT_DIR/config/sishrc"
 
 if [[ ! -x "$SISH_PATH" ]]; then
     echo "Sish: 実行ファイルが見つからないよ: $SISH_PATH" >&2
-    echo "ヒント: /home/rinta/Documents/github/Sish/zsh-5.9 で make install を実行してね" >&2
+    echo "ヒント: $SCRIPT_DIR/zsh-5.9 で make を実行してね（または SISH_PATH=/path/to/zsh を設定）" >&2
     exit 127
 fi
 
@@ -22,6 +34,29 @@ trap cleanup EXIT
 
 cat > "$DOTDIR/.zshrc" << 'EOFRC'
 # Sish temporary .zshrc (isolated via ZDOTDIR)
+
+# 環境変数で既に設定されている値を保護
+typeset -A sish_env_overrides
+for var in SISH_TONE SISH_THEME SISH_ERROR_VERBOSITY \
+           SISH_CHAR_NAME SISH_CHAR_EXPRESSION SISH_CHAR_POSITION SISH_CHAR_SIZE SISH_CHAR_ANIMATION \
+           SISH_COMPLETION_ENABLE SISH_COMPLETION_FUZZY SISH_COMPLETION_MAX_CANDIDATES \
+           SISH_COMPLETION_DIR_SIMILARITY SISH_COMPLETION_HISTORY \
+           SISH_LLM_ENABLE SISH_LLM_ENDPOINT SISH_LLM_MODEL SISH_LLM_MAX_TOKENS \
+           SISH_GUI_ENABLE SISH_GUI_SOCKET_PATH SISH_GUI_AUTOSTART SISH_GUI_EXPRESSION_SYNC; do
+    if [[ -n "${(P)var:-}" ]]; then
+        sish_env_overrides[$var]="${(P)var}"
+    fi
+done
+
+# Load user's sishrc first to get SISH_TONE early
+if [[ -f "$HOME/.sishrc" ]]; then
+    source "$HOME/.sishrc"
+fi
+
+# 環境変数で指定された値で上書き
+for var in "${(@k)sish_env_overrides}"; do
+    export "$var=${sish_env_overrides[$var]}"
+done
 
 setopt AUTO_CD
 unsetopt CORRECT
@@ -326,36 +361,59 @@ if [[ -d ~/.sish/commands.d ]]; then
     done
 fi
 
-echo "🌸 Sish - Sister Shell"
-echo "💡 ヒント: sish-config で設定メニュー"
-echo ""
+# 対話モードのみウェルカムメッセージを表示
+if [[ -o interactive ]]; then
+    echo "🌸 Sish - Sister Shell"
+    echo "💡 ヒント: sish-config で設定メニュー"
+    echo ""
+fi
 EOFRC
 
 if [[ -f "$SISH_CONFIG" ]]; then
     cat "$SISH_CONFIG" >> "$DOTDIR/.zshrc"
 fi
 
-# ユーザー設定（sish-config が書き出す先）を最後に読み込む
-if [[ -f "$HOME/.sishrc" ]]; then
-    {
-        echo ""
-        echo "# User sishrc"
-        cat "$HOME/.sishrc"
-    } >> "$DOTDIR/.zshrc"
-fi
-
 export ZDOTDIR="$DOTDIR"
 
 # argv[0] を "Sish" にして、メッセージの見た目も統一する
+# NOTE: zshは非対話モードでは .zshrc を読まないが、Sishは常に読ませたいので、
+#       -c でも ZDOTDIR の .zshrc を source するコードを前置する
 is_non_interactive=0
+has_dash_c=0
 for a in "$@"; do
-    if [[ "$a" == "-c" || "$a" == "--help" || "$a" == "--version" ]]; then
+    if [[ "$a" == "-c" ]]; then
+        has_dash_c=1
+        is_non_interactive=1
+        break
+    elif [[ "$a" == "--help" || "$a" == "--version" ]]; then
         is_non_interactive=1
         break
     fi
 done
 
-if [[ $is_non_interactive -eq 1 ]]; then
+if [[ $has_dash_c -eq 1 ]]; then
+    # -c の引数を取り出して、その前に .zshrc を source する新しいコマンドを構築
+    shift_count=0
+    for a in "$@"; do
+        shift_count=$((shift_count + 1))
+        if [[ "$a" == "-c" ]]; then
+            break
+        fi
+    done
+    # 残りの引数を取得（-c の次が実行するコマンド）
+    cmd_to_run=""
+    cmd_idx=0
+    for a in "$@"; do
+        cmd_idx=$((cmd_idx + 1))
+        if [[ $cmd_idx -gt $shift_count ]]; then
+            cmd_to_run="$a"
+            break
+        fi
+    done
+    # .zshrc を source してから元のコマンドを実行
+    wrapped_cmd="[[ -f \$ZDOTDIR/.zshrc ]] && source \$ZDOTDIR/.zshrc; $cmd_to_run"
+    exec -a Sish "$SISH_PATH" -c "$wrapped_cmd"
+elif [[ $is_non_interactive -eq 1 ]]; then
     exec -a Sish "$SISH_PATH" "$@"
 else
     exec -a Sish "$SISH_PATH" -i "$@"

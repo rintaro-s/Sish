@@ -27,6 +27,7 @@ static char sish_config_path[PATH_MAX];
 /* ここで選んだ設定値（保存用） */
 static char sish_cfg_theme[16] = "pink";
 static int sish_cfg_error_verbosity = 1;
+static int sish_cfg_tone = 0;  /* Default: SISH_TONE_STANDARD */
 
 /* 追加設定（保存用） */
 static char sish_cfg_char_name[64] = "Sish";
@@ -230,6 +231,207 @@ static void write_export_int(FILE *fp, const char *key, int value) {
     fprintf(fp, "export %s=%d\n", key, value);
 }
 
+static void copy_string_bounded(char *dst, size_t dstsize, const char *src) {
+    if (!dst || dstsize == 0) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    strncpy(dst, src, dstsize);
+    dst[dstsize - 1] = '\0';
+}
+
+static void trim_inplace(char *s) {
+    if (!s) return;
+    size_t len = strlen(s);
+    while (len > 0 && isspace((unsigned char)s[len - 1])) {
+        s[len - 1] = '\0';
+        len--;
+    }
+    char *p = s;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (p != s) memmove(s, p, strlen(p) + 1);
+}
+
+static int parse_shell_single_quoted(const char *in, char *out, size_t outsize) {
+    /* 期待: '...'(内部の ' は '\'' 形式) */
+    if (!in || !out || outsize == 0) return 0;
+    out[0] = '\0';
+
+    const char *p = in;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p != '\'') return 0;
+    p++; /* skip opening quote */
+
+    size_t w = 0;
+    while (*p) {
+        if (*p == '\'') {
+            /* end quote OR '\'' sequence */
+            if (p[1] == '\\' && p[2] == '\'' && p[3] == '\'') {
+                if (w + 1 < outsize) out[w++] = '\'';
+                p += 4;
+                continue;
+            }
+            /* end */
+            out[w] = '\0';
+            return 1;
+        }
+        if (w + 1 < outsize) out[w++] = *p;
+        p++;
+    }
+    out[w] = '\0';
+    return 0;
+}
+
+static int parse_line_kv(const char *line, char *key, size_t keysize, char *value, size_t valuesize) {
+    if (!line || !key || !value || keysize == 0 || valuesize == 0) return 0;
+    key[0] = '\0';
+    value[0] = '\0';
+
+    const char *p = line;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p == '\0' || *p == '#') return 0;
+
+    if (!strncmp(p, "export ", 7)) {
+        p += 7;
+        while (*p && isspace((unsigned char)*p)) p++;
+    }
+
+    const char *eq = strchr(p, '=');
+    if (!eq) return 0;
+
+    size_t klen = (size_t)(eq - p);
+    if (klen == 0) return 0;
+    if (klen >= keysize) klen = keysize - 1;
+    memcpy(key, p, klen);
+    key[klen] = '\0';
+    trim_inplace(key);
+
+    p = eq + 1;
+    while (*p && isspace((unsigned char)*p)) p++;
+    copy_string_bounded(value, valuesize, p);
+    trim_inplace(value);
+    return key[0] != '\0';
+}
+
+static void config_load(void) {
+    FILE *fp = fopen(sish_config_path, "r");
+    if (!fp) return;
+
+    char line[1024];
+    char key[128];
+    char rawval[768];
+    char sval[768];
+
+    while (fgets(line, (int)sizeof(line), fp)) {
+        trim_newline(line);
+        if (!parse_line_kv(line, key, sizeof(key), rawval, sizeof(rawval))) {
+            /* alias 行は別扱い */
+            const char *p = line;
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (!strncmp(p, "alias ", 6)) {
+                p += 6;
+                while (*p && isspace((unsigned char)*p)) p++;
+                const char *eq = strchr(p, '=');
+                if (!eq) continue;
+
+                char akey[32];
+                size_t klen = (size_t)(eq - p);
+                if (klen >= sizeof(akey)) klen = sizeof(akey) - 1;
+                memcpy(akey, p, klen);
+                akey[klen] = '\0';
+                trim_inplace(akey);
+                if (!is_valid_shortcut_key(akey)) continue;
+
+                if (parse_shell_single_quoted(eq + 1, sval, sizeof(sval))) {
+                    shortcuts_init_defaults_if_needed();
+                    /* 既存キーがあれば上書き、なければ追加 */
+                    int found = 0;
+                    for (int i = 0; i < sish_cfg_shortcut_count; i++) {
+                        if (!strcmp(sish_cfg_shortcuts[i].key, akey)) {
+                            copy_string_bounded(sish_cfg_shortcuts[i].command, sizeof(sish_cfg_shortcuts[i].command), sval);
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found && sish_cfg_shortcut_count < SISH_MAX_SHORTCUTS) {
+                        copy_string_bounded(sish_cfg_shortcuts[sish_cfg_shortcut_count].key, sizeof(sish_cfg_shortcuts[0].key), akey);
+                        copy_string_bounded(sish_cfg_shortcuts[sish_cfg_shortcut_count].command, sizeof(sish_cfg_shortcuts[0].command), sval);
+                        sish_cfg_shortcut_count++;
+                    }
+                }
+            }
+            continue;
+        }
+
+        /* 値が '...' なら展開して sval に */
+        if (rawval[0] == '\'' && parse_shell_single_quoted(rawval, sval, sizeof(sval))) {
+            /* sval に展開済み */
+        } else {
+            copy_string_bounded(sval, sizeof(sval), rawval);
+        }
+
+        if (!strcmp(key, "SISH_THEME")) {
+            copy_string_bounded(sish_cfg_theme, sizeof(sish_cfg_theme), sval);
+        } else if (!strcmp(key, "SISH_ERROR_VERBOSITY")) {
+            int v = atoi(sval);
+            if (v < 1) v = 1;
+            if (v > 4) v = 4;
+            sish_cfg_error_verbosity = v;
+        } else if (!strcmp(key, "SISH_TONE")) {
+            int v = atoi(sval);
+            if (v < 0) v = 0;
+            if (v >= (int)SISH_TONE_COUNT) v = (int)SISH_TONE_COUNT - 1;
+            sish_cfg_tone = v;
+        } else if (!strcmp(key, "SISH_CHAR_NAME")) {
+            copy_string_bounded(sish_cfg_char_name, sizeof(sish_cfg_char_name), sval);
+        } else if (!strcmp(key, "SISH_CHAR_EXPRESSION")) {
+            copy_string_bounded(sish_cfg_char_expression, sizeof(sish_cfg_char_expression), sval);
+        } else if (!strcmp(key, "SISH_CHAR_POSITION")) {
+            copy_string_bounded(sish_cfg_char_position, sizeof(sish_cfg_char_position), sval);
+        } else if (!strcmp(key, "SISH_CHAR_SIZE")) {
+            copy_string_bounded(sish_cfg_char_size, sizeof(sish_cfg_char_size), sval);
+        } else if (!strcmp(key, "SISH_CHAR_ANIMATION")) {
+            sish_cfg_char_animation = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_COMPLETION_ENABLE")) {
+            sish_cfg_completion_enable = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_COMPLETION_FUZZY")) {
+            sish_cfg_completion_fuzzy = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_COMPLETION_MAX_CANDIDATES")) {
+            int v = atoi(sval);
+            if (v < 1) v = 1;
+            if (v > 1000) v = 1000;
+            sish_cfg_completion_max_candidates = v;
+        } else if (!strcmp(key, "SISH_COMPLETION_DIR_SIMILARITY")) {
+            sish_cfg_completion_dir_similarity = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_COMPLETION_HISTORY")) {
+            sish_cfg_completion_history = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_LLM_ENABLE")) {
+            sish_cfg_llm_enable = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_LLM_ENDPOINT")) {
+            copy_string_bounded(sish_cfg_llm_endpoint, sizeof(sish_cfg_llm_endpoint), sval);
+        } else if (!strcmp(key, "SISH_LLM_MODEL")) {
+            copy_string_bounded(sish_cfg_llm_model, sizeof(sish_cfg_llm_model), sval);
+        } else if (!strcmp(key, "SISH_LLM_MAX_TOKENS")) {
+            int v = atoi(sval);
+            if (v < 1) v = 1;
+            if (v > 200000) v = 200000;
+            sish_cfg_llm_max_tokens = v;
+        } else if (!strcmp(key, "SISH_GUI_ENABLE")) {
+            sish_cfg_gui_enable = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_GUI_SOCKET_PATH")) {
+            copy_string_bounded(sish_cfg_gui_socket_path, sizeof(sish_cfg_gui_socket_path), sval);
+        } else if (!strcmp(key, "SISH_GUI_AUTOSTART")) {
+            sish_cfg_gui_autostart = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_GUI_EXPRESSION_SYNC")) {
+            sish_cfg_gui_expression_sync = atoi(sval) ? 1 : 0;
+        }
+    }
+
+    fclose(fp);
+    sish_cfg_theme[sizeof(sish_cfg_theme) - 1] = '\0';
+}
+
 /* 画面クリア */
 static void sish_clear_screen(void) {
     printf("\033[2J\033[H");
@@ -257,15 +459,15 @@ static void show_config_header(void) {
 static void show_main_menu(int selected) {
     const char *menu_items[] = {
         "1. テーマカラー設定",
-        "2. キャラクター設定",
-        "3. ショートカット管理",
-        "4. 補完機能設定",
-        "5. LLM統合設定",
-        "6. エラーメッセージ詳細度",
-        "7. GUI連携設定",
-        "8. 設定をリセット",
-        "9. 設定を保存して終了",
-        "0. キャンセル",
+        "2. 口調・パーソナリティ設定",
+        "3. キャラクター設定",
+        "4. ショートカット管理",
+        "5. 補完機能設定",
+        "6. LLM統合設定",
+        "7. エラーメッセージ詳細度",
+        "8. GUI連携設定",
+        "9. 設定をリセット",
+        "0. 設定を保存して終了",
         NULL
     };
     
@@ -332,6 +534,56 @@ static void config_theme_color(void) {
 
     sish_cfg_theme[sizeof(sish_cfg_theme) - 1] = '\0';
     printf("\n%s✅ テーマを変更したよ！（保存は『設定を保存して終了』）%s\n", SISH_CHAR_COLOR, SISH_COLOR_RESET);
+    sleep(1);
+}
+
+/* 口調・パーソナリティ設定 */
+static void config_tone(void) {
+    show_config_header();
+    printf("%s口調・パーソナリティ設定%s\n\n", SISH_CMD_COLOR, SISH_COLOR_RESET);
+    
+    const char *tones[] = {
+        "1. 標準妹モード（お兄ちゃん！、心配口調）",
+        "2. しっかり妹モード（断定的、無駄なし）",
+        "3. 甘え妹モード（お兄ちゃん…、弱気）",
+        "4. せっかち妹モード（短気、即実行）",
+        "5. 教え上手妹モード（理由追加、柔らか）",
+        "6. 無感情妹モード（感情語ゼロ）",
+        "7. ヤンデレ妹モード（決め打ち、強引）",
+        NULL
+    };
+    
+    printf("  現在の設定: %s%s%s\n\n", 
+           SISH_CHAR_COLOR, sish_tone_name(sish_cfg_tone), SISH_COLOR_RESET);
+    
+    for (int i = 0; tones[i]; i++) {
+        if (i == sish_cfg_tone) {
+            printf("  %s%s ← 現在選択中%s\n", 
+                   SISH_SUGGEST_COLOR, tones[i], SISH_COLOR_RESET);
+        } else {
+            printf("  %s\n", tones[i]);
+        }
+    }
+    
+    printf("\n%s選択してね（1-7）: %s", SISH_HINT_COLOR, SISH_COLOR_RESET);
+    fflush(stdout);
+    
+    int choice = read_key_blocking();
+    if (choice < 0) return;
+    if (choice == 27 || choice == '0') {
+        printf("\n%sキャンセルしたよ！%s\n", SISH_HINT_COLOR, SISH_COLOR_RESET);
+        sleep(1);
+        return;
+    }
+
+    if (choice >= '1' && choice <= '7') {
+        sish_cfg_tone = choice - '1';
+        sish_set_tone(sish_cfg_tone);
+        printf("\n%s✅ 口調を変更したよ！（保存は『設定を保存して終了』）%s\n", 
+               SISH_CHAR_COLOR, SISH_COLOR_RESET);
+    } else {
+        printf("\n%sキャンセルしたよ！%s\n", SISH_HINT_COLOR, SISH_COLOR_RESET);
+    }
     sleep(1);
 }
 
@@ -738,6 +990,7 @@ static void config_save(void) {
         fprintf(fp, "# Generated by Sish Config Tool\n\n");
         write_export_string(fp, "SISH_THEME", sish_cfg_theme);
         write_export_int(fp, "SISH_ERROR_VERBOSITY", sish_cfg_error_verbosity);
+        write_export_int(fp, "SISH_TONE", sish_cfg_tone);
 
         fprintf(fp, "\n# Character\n");
         write_export_string(fp, "SISH_CHAR_NAME", sish_cfg_char_name);
@@ -816,6 +1069,10 @@ sish_show_config_menu(void)
     snprintf(sish_config_path, sizeof(sish_config_path), 
              "%s/.sishrc", getenv("HOME"));
 
+    /* 既存設定をロードしてUIに反映 */
+    shortcuts_init_defaults_if_needed();
+    config_load();
+
     if (!isatty(STDIN_FILENO)) {
         fprintf(stderr, "%s❌ sish-config: 対話端末じゃないと操作できないよ…%s\n",
                 SISH_ERROR_COLOR, SISH_COLOR_RESET);
@@ -870,18 +1127,16 @@ sish_show_config_menu(void)
             case '\r':  /* Enter */
                 switch (selected) {
                     case 0: config_theme_color(); break;
-                    case 1: config_character(); break;
-                    case 2: config_shortcuts(); break;
-                    case 3: config_completion(); break;
-                    case 4: config_llm(); break;
-                    case 5: config_error_verbosity(); break;
-                    case 6: config_gui(); break;
-                    case 7: config_reset(); break;
-                    case 8:
-                        config_save();
-                        running = 0;
-                        break;
+                    case 1: config_tone(); break;
+                    case 2: config_character(); break;
+                    case 3: config_shortcuts(); break;
+                    case 4: config_completion(); break;
+                    case 5: config_llm(); break;
+                    case 6: config_error_verbosity(); break;
+                    case 7: config_gui(); break;
+                    case 8: config_reset(); break;
                     case 9:
+                        config_save();
                         running = 0;
                         break;
                 }

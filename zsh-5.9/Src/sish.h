@@ -31,11 +31,44 @@
 
 #define SISH_VERSION "1.0.0"
 #define SISH_NAME "Sish"
-#define SISH_CHARACTER_NAME "Sish"
+
+/* ========================================
+ * Runtime Configuration (from env)
+ * ======================================== */
+
+const char *sish_character_name(void);
+
+int sish_error_verbosity(void);
+
+int sish_gui_enabled(void);
+int sish_gui_autostart(void);
+int sish_gui_expression_sync(void);
+const char *sish_gui_socket_path(void);
+
+int sish_completion_enabled(void);
+int sish_completion_fuzzy(void);
+int sish_completion_dir_similarity(void);
+int sish_completion_history(void);
+int sish_completion_max_candidates(void);
+
+int sish_llm_enabled_setting(void);
+const char *sish_llm_endpoint_setting(void);
+const char *sish_llm_model_setting(void);
+int sish_llm_max_tokens_setting(void);
+
+const char *sish_color_char(void);
+const char *sish_color_cmd(void);
+const char *sish_color_error(void);
+const char *sish_color_suggest(void);
+const char *sish_color_hint(void);
 
 /* ========================================
  * ANSI Color Codes for Terminal Output
  * ======================================== */
+
+/* Character name (runtime-configurable) */
+#undef SISH_CHARACTER_NAME
+#define SISH_CHARACTER_NAME (sish_character_name())
 
 #define SISH_COLOR_RESET    "\033[0m"
 #define SISH_COLOR_RED      "\033[31m"
@@ -49,12 +82,17 @@
 #define SISH_COLOR_PINK     "\033[38;5;213m"
 #define SISH_COLOR_ORANGE   "\033[38;5;208m"
 
-/* Character-specific colors */
-#define SISH_CHAR_COLOR     SISH_COLOR_PINK
-#define SISH_CMD_COLOR      SISH_COLOR_CYAN
-#define SISH_ERROR_COLOR    SISH_COLOR_RED
-#define SISH_SUGGEST_COLOR  SISH_COLOR_GREEN
-#define SISH_HINT_COLOR     SISH_COLOR_YELLOW
+/* Character-specific colors (theme-aware) */
+#undef SISH_CHAR_COLOR
+#undef SISH_CMD_COLOR
+#undef SISH_ERROR_COLOR
+#undef SISH_SUGGEST_COLOR
+#undef SISH_HINT_COLOR
+#define SISH_CHAR_COLOR     (sish_color_char())
+#define SISH_CMD_COLOR      (sish_color_cmd())
+#define SISH_ERROR_COLOR    (sish_color_error())
+#define SISH_SUGGEST_COLOR  (sish_color_suggest())
+#define SISH_HINT_COLOR     (sish_color_hint())
 
 /* ========================================
  * Error Type Definitions
@@ -89,6 +127,21 @@ typedef enum {
     SISH_EMOTION_SLEEPY,
     SISH_EMOTION_NEUTRAL
 } SishEmotion;
+
+/* ========================================
+ * Personality/Tone Types
+ * ======================================== */
+
+typedef enum {
+    SISH_TONE_STANDARD = 0,      /* 標準妹モード（お兄ちゃん！、心配口調） */
+    SISH_TONE_RELIABLE,          /* しっかり妹モード（断定的、無駄なし） */
+    SISH_TONE_SWEET,             /* 甘え妹モード（お兄ちゃん…、弱気） */
+    SISH_TONE_QUICK,             /* せっかち妹モード（短気、即実行） */
+    SISH_TONE_TEACHER,           /* 教え上手妹モード（理由追加、柔らか） */
+    SISH_TONE_EMOTIONLESS,       /* 無感情妹モード（感情語ゼロ） */
+    SISH_TONE_YANDERE,           /* ヤンデレ妹モード（決め打ち、強引） */
+    SISH_TONE_COUNT
+} SishTone;
 
 /* ========================================
  * GUI Communication Socket Path
@@ -161,6 +214,11 @@ int sish_console_is_running(void);
 /* LLM integration (optional) */
 int sish_llm_query(const char *prompt, char *response, size_t response_size);
 
+/* Tone/Personality management */
+void sish_set_tone(SishTone sish_tone);
+SishTone sish_get_tone(void);
+const char *sish_tone_name(SishTone sish_tone);
+
 /* ========================================
  * Inline Helper Functions
  * ======================================== */
@@ -210,6 +268,8 @@ void sish_zerrnam(const char *cmd, const char *fmt, ...);
 /* Enhanced completion system */
 int sish_smart_completion(const char *cmd, const char *arg, char ***suggestions);
 void sish_show_completions(char **suggestions, int count);
+int sish_complete_path(const char *partial_path, char ***suggestions);
+void sish_free_completion_suggestions(char **suggestions, int count);
 
 /* Interactive configuration system */
 void sish_show_config_menu(void);

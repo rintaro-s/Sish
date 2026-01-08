@@ -2,3 +2,12 @@ Sish-Console/target/debug/
 .venv/
 __pycache__/
 marian-en-jap-ct2/
+zsh-5.9/install/
+zsh-5.9/*.o
+zsh-5.9/*.so
+zsh-5.9/Src/zsh
+zsh-5.9/Makefile
+zsh-5.9/config.status
+zsh-5.9/config.log
+zsh-5.9/config.h
+zsh-5.9/config.cache

@@ -4,12 +4,13 @@
 
 ---
 
+
 ## 即座に使う
 
 ```bash
 cd Sish
 
-# 方法1: 起動スクリプト（推奨）
+# 方法1: 起動スクリプト
 ./sish
 
 # 方法2: 壁紙が使えて、自動でSishを使えるGUI
@@ -151,6 +152,19 @@ Initialized empty Git repository in /home/rinta/Documents/github/Sish/GitHub/rin
  2 files changed, 40 insertions(+)
  create mode 100644 README.md
  create mode 100644 README.md.back
-
+```
 
 ---
+## ロール（妹モード）について
+
+Sishは複数の「妹ロール（モード）」を搭載しています。妹の性格や口調を切り替えて楽しめます。
+
+| モード名 | 特徴 | 例 |
+|:---|:---|:---|
+| 標準妹モード | 素直で世話焼き | Sish：お兄ちゃん！"hit"って無いよ… "git"の間違いじゃない？ |
+| しっかり妹モード | 有能・断定的 | Sish："hit" は存在しない。"git" を実行する？ |
+| 甘え妹モード | 距離が近い・弱気 | Sish：お兄ちゃん…"hit"って無いみたい… "git"なら、あるよ…？ |
+| せっかち妹モード | 短気・即断即決 | Sish："hit" → "git"。実行するね |
+| 教え上手妹モード | 説明がうまい | Sish：お兄ちゃん、"hit"はコマンドに無いよ "git"はバージョン管理のコマンドだよ |
+| 無感情妹モード | 感情薄い・静か | Sish："hit" 不明。"git" 提案。 |
+| ヤンデレ妹モード | 執着心・命令的 | Sish：お兄ちゃん…"hit"なんて使わないで… "git"だけ使って…絶対に… |

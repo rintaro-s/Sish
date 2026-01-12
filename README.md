@@ -1,7 +1,7 @@
 
-## English Guide (Sister Shell)
+## Sish - Sister Shell
 
-**Escape the dull "black screen"—a shell environment with a cute little sister personality.**
+**No more boring 'black screens'—meet the shell environment with a cute little sister personality.**
 
 > *Translated by GPT-4.1. Please refer to the original Japanese text above for reference.*
 

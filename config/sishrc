@@ -2,9 +2,20 @@
 # ~/.sishrc に配置してください
 
 # ========================================
+# 言語設定 / Language Configuration
+# ========================================
+# ja: 日本語 / en: English
+: ${SISH_LANG:=ja}
+
+# Load internationalization support
+if [[ -f "${${(%):-%x}:A:h}/sish_i18n.zsh" ]]; then
+    source "${${(%):-%x}:A:h}/sish_i18n.zsh"
+fi
+
+# ========================================
 # プロンプト設定
 # ========================================
-PROMPT='%F{213}Sish%f:%F{111}%~%f %# '
+sish_setup_prompt 2>/dev/null || PROMPT='%F{213}Sish%f:%F{111}%~%f %# '
 
 # ========================================
 # 基本設定
@@ -56,10 +67,17 @@ alias ipy='ipython'
 # 未定義コマンド提案を即実行（次の行で y と打つ）
 y() {
     local f="/tmp/sish-last-suggestion-$$"
-    local af="/tmp/sish-last-args-$$"
+    local pf=""
+    [[ -n "${PPID:-}" ]] && pf="/tmp/sish-last-suggestion-$PPID"
+
+    local pid_for_suggestion="$$"
     local df="/tmp/sish-last-dir-$$"  # ディレクトリ補正用
     local sug=""
-    if [[ -r "$f" ]]; then
+    if [[ -n "$pf" && -r "$pf" ]]; then
+        pid_for_suggestion="$PPID"
+        sug="$(< "$pf")"
+        rm -f "$pf" 2>/dev/null || true
+    elif [[ -r "$f" ]]; then
         sug="$(< "$f")"
         rm -f "$f" 2>/dev/null || true
     else
@@ -80,19 +98,20 @@ y() {
         local -a words
         words=( ${(z)sug} )
         if (( ${#words} == 0 )); then
-            print -r -- "Sish：お兄ちゃん、候補が空っぽだった…"
+            sish_msg "y_empty_suggestion"
             return 1
         fi
 
         # 候補がコマンド名だけなら、元コマンドの引数を引き継ぐ
         # 例: `hit clone` -> 候補 `git` -> `git clone`
         if (( ${#words} == 1 )) && (( $# == 0 )); then
+            local af="/tmp/sish-last-args-${pid_for_suggestion}"
             if [[ -r "$af" ]]; then
                 local -a saved_args
                 saved_args=( ${(f)"$(< "$af")"} )
                 rm -f "$af" 2>/dev/null || true
                 if (( ${#saved_args} )); then
-                    command "${words[@]}" "${saved_args[@]}"
+                    "${words[@]}" "${saved_args[@]}"
                     return $?
                 fi
             fi
@@ -103,15 +122,15 @@ y() {
                 local -a prev_words
                 prev_words=( ${(z)prev} )
                 if (( ${#prev_words} >= 2 )); then
-                    command "${words[@]}" "${prev_words[@]:1}"
+                    "${words[@]}" "${prev_words[@]:1}"
                     return $?
                 fi
             fi
         fi
 
-        command "${words[@]}" "$@"
+        "${words[@]}" "$@"
     else
-        print -r -- "Sish：お兄ちゃん、いま実行できる候補が無いよ…"
+        sish_msg "y_no_suggestion"
         return 1
     fi
 }
@@ -121,11 +140,11 @@ summon() { command git clone -- "$@"; }
 
 void() {
     if [[ $# -lt 1 ]]; then
-        print -r -- "Sish：お兄ちゃん、voidは消したいパスを指定してね！（例: void ./tmp）"
+        sish_msg "void_usage"
         return 2
     fi
     if [[ "$1" == "/" ]]; then
-        print -r -- "Sish：それはダメ！ '/' は消しちゃだめ！"
+        sish_msg "void_root_warning"
         return 1
     fi
     command rm -rf -- "$@"
@@ -135,7 +154,7 @@ fiat() {
     if (( EUID == 0 )); then
         command -- "$@"
     else
-        print -r -- "Sish：お兄ちゃん、fiatはSishが管理者で動いてる時だけパスワードレスだよ…（sudoで実行するね）"
+        sish_msg "fiat_using_sudo"
         command sudo -- "$@"
     fi
 }
@@ -144,7 +163,7 @@ gaze() { command ls -lahFt --color=auto -- "$@"; }
 
 lore() {
     if [[ $# -ne 1 ]]; then
-        print -r -- "Sish：loreは1つだけ指定してね！（例: lore myfile）"
+        sish_msg "lore_usage"
         return 2
     fi
     command cp -a -- "$1" "$1.back"
@@ -153,7 +172,7 @@ lore() {
 node() {
     # node: first priority (or second if first doesn't exist)
     if [[ $# -lt 1 ]]; then
-        print -r -- "Sish：nodeは最低1つ指定してね！（例: node hoge）"
+        sish_msg "node_usage"
         return 2
     fi
     if [[ -d "$1" ]]; then
@@ -164,14 +183,14 @@ node() {
         builtin cd -- "$2"
         return $?
     fi
-    print -r -- "Sish：お兄ちゃん、指定したフォルダが見つからないよ…"
+    sish_msg "node_not_found"
     return 1
 }
 
 genesis() {
     # git init + add + commit "first commit"
     if [[ $# -eq 0 ]]; then
-        print -r -- "Sish：genesisはリポジトリ作成先を指定してね！（例: genesis myproject）"
+        sish_msg "genesis_usage"
         return 2
     fi
     command mkdir -p -- "$1" || return 1
@@ -184,7 +203,7 @@ genesis() {
 oracle() {
     # chmod +x for specified paths
     if [[ $# -lt 1 ]]; then
-        print -r -- "Sish：oracleで実行権をつけたいパスを指定してね！（例: oracle script.sh）"
+        sish_msg "oracle_usage"
         return 2
     fi
     command chmod +x -- "$@"
@@ -206,10 +225,10 @@ extract() {
             *.tar)       tar xf "$1"      ;;
             *.zip)       unzip "$1"       ;;
             *.Z)         uncompress "$1"  ;;
-            *)           print -r -- "Sish：'$1' は解凍できないよ…" ;;
+            *)           sish_msg "extract_unsupported" "$1" ;;
         esac
     else
-        print -r -- "Sish：'$1' は有効なファイルじゃないよ…"
+        sish_msg "extract_invalid" "$1"
     fi
 }
 
@@ -230,7 +249,7 @@ fi
 # ウェルカムメッセージ（対話モードのみ）
 # ========================================
 if [[ -o interactive ]]; then
-    echo "Sishへようこそ！お兄ちゃん！"
-    echo "sish-config で設定メニューを開けるよ！"
+    sish_msg "welcome"
+    sish_msg "hint_config"
     echo ""
 fi

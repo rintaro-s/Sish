@@ -14,7 +14,8 @@
 /* 主要コマンドのデータベース */
 typedef struct {
     const char *cmd;
-    const char *description;
+    const char *description_ja;
+    const char *description_en;
     int (*completion_func)(const char *input, char ***suggestions);
 } FamousCommand;
 
@@ -410,27 +411,27 @@ static int complete_generic_file(const char *input, char ***suggestions) {
 
 /* 主要コマンドリスト */
 static FamousCommand famous_commands[] = {
-    {"git", "バージョン管理システム", complete_git},
-    {"docker", "コンテナ管理", complete_docker},
-    {"npm", "Node.jsパッケージマネージャ", complete_npm},
-    {"yarn", "Node.jsパッケージマネージャ", complete_npm},
-    {"python", "Pythonインタープリタ", complete_python},
-    {"python3", "Python 3インタープリタ", complete_python},
-    {"pip", "Pythonパッケージインストーラ", complete_generic_file},
-    {"pip3", "Python 3パッケージインストーラ", complete_generic_file},
-    {"cd", "ディレクトリ変更", complete_cd},
-    {"ls", "ファイル一覧表示", complete_generic_file},
-    {"cat", "ファイル内容表示", complete_generic_file},
-    {"grep", "テキスト検索", complete_generic_file},
-    {"find", "ファイル検索", complete_generic_file},
-    {"ssh", "リモート接続", complete_generic_file},
-    {"sudo", "管理者権限実行", complete_generic_file},
-    {"vim", "テキストエディタ", complete_generic_file},
-    {"nano", "テキストエディタ", complete_generic_file},
-    {"make", "ビルドツール", complete_generic_file},
-    {"cargo", "Rustビルドツール", complete_generic_file},
-    {"go", "Go言語ツール", complete_generic_file},
-    {NULL, NULL, NULL}
+    {"git", "バージョン管理システム", "Version control system", complete_git},
+    {"docker", "コンテナ管理", "Container management", complete_docker},
+    {"npm", "Node.jsパッケージマネージャ", "Node.js package manager", complete_npm},
+    {"yarn", "Node.jsパッケージマネージャ", "Node.js package manager", complete_npm},
+    {"python", "Pythonインタープリタ", "Python interpreter", complete_python},
+    {"python3", "Python 3インタープリタ", "Python 3 interpreter", complete_python},
+    {"pip", "Pythonパッケージインストーラ", "Python package installer", complete_generic_file},
+    {"pip3", "Python 3パッケージインストーラ", "Python 3 package installer", complete_generic_file},
+    {"cd", "ディレクトリ変更", "Change directory", complete_cd},
+    {"ls", "ファイル一覧表示", "List files", complete_generic_file},
+    {"cat", "ファイル内容表示", "Show file contents", complete_generic_file},
+    {"grep", "テキスト検索", "Search text", complete_generic_file},
+    {"find", "ファイル検索", "Find files", complete_generic_file},
+    {"ssh", "リモート接続", "Remote connection", complete_generic_file},
+    {"sudo", "管理者権限実行", "Run as administrator", complete_generic_file},
+    {"vim", "テキストエディタ", "Text editor", complete_generic_file},
+    {"nano", "テキストエディタ", "Text editor", complete_generic_file},
+    {"make", "ビルドツール", "Build tool", complete_generic_file},
+    {"cargo", "Rustビルドツール", "Rust build tool", complete_generic_file},
+    {"go", "Go言語ツール", "Go language tool", complete_generic_file},
+    {NULL, NULL, NULL, NULL}
 };
 
 /*
@@ -453,8 +454,13 @@ sish_smart_completion(const char *cmd, const char *arg, char ***suggestions)
     /* 主要コマンドを検索 */
     for (int i = 0; famous_commands[i].cmd; i++) {
         if (strcmp(cmd, famous_commands[i].cmd) == 0) {
-            fprintf(stderr, "%s💡 %s の補完候補：%s\n",
-                    SISH_HINT_COLOR, cmd, SISH_COLOR_RESET);
+            if (sish_lang_is_en()) {
+                fprintf(stderr, "%s💡 Completion candidates for %s:%s\n",
+                        SISH_HINT_COLOR, cmd, SISH_COLOR_RESET);
+            } else {
+                fprintf(stderr, "%s💡 %s の補完候補：%s\n",
+                        SISH_HINT_COLOR, cmd, SISH_COLOR_RESET);
+            }
             return famous_commands[i].completion_func(needle, suggestions);
         }
     }
@@ -474,14 +480,18 @@ sish_show_completions(char **suggestions, int count)
     if (count > max_candidates) count = max_candidates;
 
     if (count == 0) {
-        fprintf(stderr, "%sうーん、補完候補が見つからないよ...%s\n",
-                SISH_CHAR_COLOR, SISH_COLOR_RESET);
+        fprintf(stderr, "%s%s%s\n",
+            SISH_CHAR_COLOR,
+            sish_lang_is_en() ? "Hmm... no completion candidates found..." : "うーん、補完候補が見つからないよ...",
+            SISH_COLOR_RESET);
         fflush(stderr);
         return;
     }
     
-    fprintf(stderr, "%s✨ こんなのはどう？%s\n", 
-            SISH_CHAR_COLOR, SISH_COLOR_RESET);
+        fprintf(stderr, "%s%s%s\n",
+            SISH_CHAR_COLOR,
+            sish_lang_is_en() ? "✨ How about these?" : "✨ こんなのはどう？",
+            SISH_COLOR_RESET);
     
     for (int i = 0; i < count; i++) {
         fprintf(stderr, "  %s%d%s) %s%s%s\n",
@@ -489,8 +499,10 @@ sish_show_completions(char **suggestions, int count)
                 SISH_HINT_COLOR, suggestions[i], SISH_COLOR_RESET);
     }
     
-    fprintf(stderr, "%sTabキーでどんどん補完できるよ！%s\n",
-            SISH_HINT_COLOR, SISH_COLOR_RESET);
+        fprintf(stderr, "%s%s%s\n",
+            SISH_HINT_COLOR,
+            sish_lang_is_en() ? "Press Tab to keep completing!" : "Tabキーでどんどん補完できるよ！",
+            SISH_COLOR_RESET);
 
     fflush(stderr);
 }

@@ -22,6 +22,7 @@ use crate::config::Config;
 use crate::terminal::SishTerminal;
 use crate::character::CharacterLayer;
 use crate::socket::SocketServer;
+use crate::i18n::tr;
 
 /// Build the main application UI
 pub fn build_ui(app: &Application) {
@@ -198,24 +199,24 @@ fn create_header_bar() -> HeaderBar {
     
     // File submenu
     let file_menu = Menu::new();
-    file_menu.append(Some("新しいタブ"), Some("app.new-tab"));
-    file_menu.append(Some("設定"), Some("app.preferences"));
-    file_menu.append(Some("終了"), Some("app.quit"));
-    menu.append_submenu(Some("ファイル"), &file_menu);
+    file_menu.append(Some(tr("新しいタブ", "New Tab")), Some("app.new-tab"));
+    file_menu.append(Some(tr("設定", "Preferences")), Some("app.preferences"));
+    file_menu.append(Some(tr("終了", "Quit")), Some("app.quit"));
+    menu.append_submenu(Some(tr("ファイル", "File")), &file_menu);
     
     // Edit submenu
     let edit_menu = Menu::new();
-    edit_menu.append(Some("コピー"), Some("app.copy"));
-    edit_menu.append(Some("貼り付け"), Some("app.paste"));
-    edit_menu.append(Some("すべて選択"), Some("app.select-all"));
-    menu.append_submenu(Some("編集"), &edit_menu);
+    edit_menu.append(Some(tr("コピー", "Copy")), Some("app.copy"));
+    edit_menu.append(Some(tr("貼り付け", "Paste")), Some("app.paste"));
+    edit_menu.append(Some(tr("すべて選択", "Select All")), Some("app.select-all"));
+    menu.append_submenu(Some(tr("編集", "Edit")), &edit_menu);
     
     // View submenu
     let view_menu = Menu::new();
-    view_menu.append(Some("フルスクリーン"), Some("app.fullscreen"));
-    view_menu.append(Some("ズームイン"), Some("app.zoom-in"));
-    view_menu.append(Some("ズームアウト"), Some("app.zoom-out"));
-    menu.append_submenu(Some("表示"), &view_menu);
+    view_menu.append(Some(tr("フルスクリーン", "Fullscreen")), Some("app.fullscreen"));
+    view_menu.append(Some(tr("ズームイン", "Zoom In")), Some("app.zoom-in"));
+    view_menu.append(Some(tr("ズームアウト", "Zoom Out")), Some("app.zoom-out"));
+    menu.append_submenu(Some(tr("表示", "View")), &view_menu);
     
     // Create menu button
     let menu_button = MenuButton::builder()
@@ -228,7 +229,7 @@ fn create_header_bar() -> HeaderBar {
     // New tab button
     let new_tab_button = Button::builder()
         .icon_name("list-add-symbolic")
-        .tooltip_text("新しいタブ")
+        .tooltip_text(tr("新しいタブ", "New Tab"))
         .build();
     new_tab_button.set_action_name(Some("app.new-tab"));
     header.pack_start(&new_tab_button);
@@ -236,7 +237,7 @@ fn create_header_bar() -> HeaderBar {
     // Settings button
     let settings_button = Button::builder()
         .icon_name("emblem-system-symbolic")
-        .tooltip_text("設定")
+        .tooltip_text(tr("設定", "Preferences"))
         .build();
     settings_button.set_action_name(Some("app.preferences"));
     header.pack_end(&settings_button);
@@ -505,9 +506,9 @@ fn add_new_tab(notebook: &Notebook, config: &Config) {
         if popover_holder_for_cb.borrow().is_none() {
             let menu = gio::Menu::new();
             // These actions are defined on the application in register_actions().
-            menu.append(Some("コピー"), Some("app.copy"));
-            menu.append(Some("ペースト"), Some("app.paste"));
-            menu.append(Some("全選択"), Some("app.select-all"));
+            menu.append(Some(tr("コピー", "Copy")), Some("app.copy"));
+            menu.append(Some(tr("ペースト", "Paste")), Some("app.paste"));
+            menu.append(Some(tr("全選択", "Select All")), Some("app.select-all"));
 
             let popover = gtk4::PopoverMenu::from_model(Some(&menu));
             popover.set_parent(&term_for_menu);
@@ -536,7 +537,7 @@ fn add_new_tab(notebook: &Notebook, config: &Config) {
 
     let close_btn = Button::builder()
         .icon_name("window-close-symbolic")
-        .tooltip_text("タブを閉じる")
+        .tooltip_text(tr("タブを閉じる", "Close Tab"))
         .build();
     close_btn.add_css_class("flat");
     tab_box.append(&close_btn);
@@ -628,7 +629,7 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
     let dialog = Window::builder()
         .transient_for(window)
         .modal(true)
-        .title("設定")
+        .title(tr("設定", "Preferences"))
         .default_width(520)
         .default_height(480)
         .build();
@@ -644,7 +645,7 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
 
     // Wallpaper
     let wallpaper_row = GtkBox::new(Orientation::Horizontal, 8);
-    let wallpaper_label = Label::new(Some("壁紙パス"));
+    let wallpaper_label = Label::new(Some(tr("壁紙パス", "Wallpaper Path")));
     wallpaper_label.set_xalign(0.0);
     wallpaper_label.set_width_chars(15);
     wallpaper_row.append(&wallpaper_label);
@@ -654,13 +655,13 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
         wallpaper_entry.set_text(p);
     }
     wallpaper_row.append(&wallpaper_entry);
-    let browse_btn = Button::with_label("参照…");
+    let browse_btn = Button::with_label(tr("参照…", "Browse…"));
     wallpaper_row.append(&browse_btn);
     content.append(&wallpaper_row);
 
     // Shell
     let shell_row = GtkBox::new(Orientation::Horizontal, 8);
-    let shell_label = Label::new(Some("シェル"));
+    let shell_label = Label::new(Some(tr("シェル", "Shell")));
     shell_label.set_xalign(0.0);
     shell_label.set_width_chars(15);
     shell_row.append(&shell_label);
@@ -672,7 +673,7 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
 
     // Font size
     let font_row = GtkBox::new(Orientation::Horizontal, 8);
-    let font_label = Label::new(Some("フォントサイズ"));
+    let font_label = Label::new(Some(tr("フォントサイズ", "Font Size")));
     font_label.set_xalign(0.0);
     font_label.set_width_chars(15);
     font_row.append(&font_label);
@@ -683,7 +684,7 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
 
     // Sish theme
     let sish_theme_row = GtkBox::new(Orientation::Horizontal, 8);
-    let sish_theme_label = Label::new(Some("Sishテーマ"));
+    let sish_theme_label = Label::new(Some(tr("Sishテーマ", "Sish Theme")));
     sish_theme_label.set_xalign(0.0);
     sish_theme_label.set_width_chars(15);
     sish_theme_row.append(&sish_theme_label);
@@ -697,11 +698,15 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
 
     // Error verbosity
     let verb_row = GtkBox::new(Orientation::Horizontal, 8);
-    let verb_label = Label::new(Some("エラー詳細度"));
+    let verb_label = Label::new(Some(tr("エラー詳細度", "Error Verbosity")));
     verb_label.set_xalign(0.0);
     verb_label.set_width_chars(15);
     verb_row.append(&verb_label);
-    let verb_labels = ["1: 簡潔", "2: 標準", "3: 詳細", "4: 超詳細"];
+    let verb_labels = if crate::i18n::is_en() {
+        ["1: Brief", "2: Standard", "3: Detailed", "4: Very detailed"]
+    } else {
+        ["1: 簡潔", "2: 標準", "3: 詳細", "4: 超詳細"]
+    };
     let verb_list = gtk4::StringList::new(&verb_labels);
     let verb = gtk4::DropDown::new(Some(verb_list), None::<gtk4::Expression>);
     verb.set_selected((sish_verbosity - 1).max(0).min(3) as u32);
@@ -710,7 +715,7 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
 
     // Terminal background opacity
     let opacity_row = GtkBox::new(Orientation::Horizontal, 8);
-    let opacity_label = Label::new(Some("背景透明度"));
+    let opacity_label = Label::new(Some(tr("背景透明度", "Background Opacity")));
     opacity_label.set_xalign(0.0);
     opacity_label.set_width_chars(15);
     opacity_row.append(&opacity_label);
@@ -724,7 +729,7 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
 
     // Letter spacing
     let spacing_row = GtkBox::new(Orientation::Horizontal, 8);
-    let spacing_label = Label::new(Some("文字間隔"));
+    let spacing_label = Label::new(Some(tr("文字間隔", "Letter Spacing")));
     spacing_label.set_xalign(0.0);
     spacing_label.set_width_chars(15);
     spacing_row.append(&spacing_label);
@@ -738,14 +743,14 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
 
     // Character layer enabled
     let character_row = GtkBox::new(Orientation::Horizontal, 8);
-    let character_label = Label::new(Some("キャラクター表示"));
+    let character_label = Label::new(Some(tr("キャラクター表示", "Character")));
     character_label.set_xalign(0.0);
     character_label.set_width_chars(15);
     character_row.append(&character_label);
     let character_check = gtk4::CheckButton::new();
     character_check.set_active(cfg.character.enabled);
     character_row.append(&character_check);
-    let character_note = Label::new(Some("※再起動後に反映"));
+    let character_note = Label::new(Some(tr("※再起動後に反映", "(Applied after restart)")));
     character_note.add_css_class("dim-label");
     character_note.set_xalign(0.0);
     character_row.append(&character_note);
@@ -756,9 +761,9 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
     button_box.set_halign(gtk4::Align::End);
     button_box.set_margin_top(16);
 
-    let cancel_btn = Button::with_label("キャンセル");
+    let cancel_btn = Button::with_label(tr("キャンセル", "Cancel"));
     cancel_btn.add_css_class("text-button");
-    let save_btn = Button::with_label("保存");
+    let save_btn = Button::with_label(tr("保存", "Save"));
 
     button_box.append(&cancel_btn);
     button_box.append(&save_btn);
@@ -770,7 +775,7 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
     // Browse wallpaper
     browse_btn.connect_clicked(glib::clone!(@weak dialog, @weak wallpaper_entry => move |_| {
         let file_dialog = gtk4::FileDialog::builder()
-            .title("壁紙を選択")
+            .title(tr("壁紙を選択", "Select Wallpaper"))
             .modal(true)
             .build();
 

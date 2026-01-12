@@ -36,6 +36,13 @@
  * Runtime Configuration (from env)
  * ======================================== */
 
+/* Language: controlled by SISH_LANG ("ja" default, "en" for English) */
+int sish_lang_is_en(void);
+
+#ifndef SISH_TR
+#define SISH_TR(ja, en) (sish_lang_is_en() ? (en) : (ja))
+#endif
+
 const char *sish_character_name(void);
 
 int sish_error_verbosity(void);

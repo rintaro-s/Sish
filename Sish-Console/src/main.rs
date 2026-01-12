@@ -15,6 +15,7 @@ mod config;
 mod shortcuts;
 mod snippets;
 mod completion;
+mod i18n;
 
 use gtk4::prelude::*;
 use gtk4::{Application, glib};

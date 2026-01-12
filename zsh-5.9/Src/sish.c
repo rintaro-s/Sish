@@ -17,6 +17,10 @@
 /* External reference to zsh's path variable */
 extern char **path;
 
+/* For QUICK-tone autorun via the shell helper function `y()` */
+extern HashTable shfunctab;
+extern void execstring(char *s, int dont_change_job, int exiting, char *context);
+
 /* ========================================
  * Current Personality/Tone Setting
  * ======================================== */
@@ -47,8 +51,25 @@ static char sish_cfg_llm_endpoint[256] = "";
 static char sish_cfg_llm_model[128] = "";
 static int sish_cfg_llm_max_tokens = 2000;
 
+static int
+sish_llm_ready(void)
+{
+    const char *endpoint = sish_llm_endpoint_setting();
+    return sish_llm_enabled_setting() && endpoint && *endpoint;
+}
+
 static char sish_cfg_character_name[64] = SISH_NAME;
 static char sish_cfg_theme[16] = "pink";
+
+/**/
+int
+sish_lang_is_en(void)
+{
+    const char *v = getenv("SISH_LANG");
+    if (!v || !*v) return 0;
+    /* Accept: en, EN, en_US, etc. */
+    return (v[0] == 'e' || v[0] == 'E') && (v[1] == 'n' || v[1] == 'N');
+}
 
 static const char *sish_cfg_color_char = SISH_COLOR_PINK;
 static const char *sish_cfg_color_cmd = SISH_COLOR_CYAN;
@@ -342,6 +363,24 @@ static const ToneMessage tone_cmd_not_found[] = {
     {"お兄ちゃん…", "\"%s\"なんて使わないで…", "\"%s\"だけ使って…絶対に…"}
 };
 
+/* English variants (SISH_LANG=en) */
+static const ToneMessage tone_cmd_not_found_en[] = {
+    /* SISH_TONE_STANDARD */
+    {"Onii-chan! ", "\"%s\" isn't a command...", "Did you mean \"%s\"?"},
+    /* SISH_TONE_RELIABLE */
+    {"", "\"%s\" does not exist.", "Run \"%s\"?"},
+    /* SISH_TONE_SWEET */
+    {"Onii-chan... ", "\"%s\" doesn't seem to exist...", "But \"%s\" exists... maybe...?"},
+    /* SISH_TONE_QUICK */
+    {"", "\"%s\" -> \"%s\".", "Running now"},
+    /* SISH_TONE_TEACHER */
+    {"Onii-chan, ", "\"%s\" isn't a command", "\"%s\" is a version control command"},
+    /* SISH_TONE_EMOTIONLESS */
+    {"", "\"%s\" unknown.", "Suggest \"%s\"."},
+    /* SISH_TONE_YANDERE */
+    {"Onii-chan... ", "Don't use \"%s\"...", "Use only \"%s\"... absolutely..."}
+};
+
 /* 各口調ごとのファイル未検出メッセージ */
 static const ToneMessage tone_file_not_found[] = {
     /* SISH_TONE_STANDARD */
@@ -358,6 +397,23 @@ static const ToneMessage tone_file_not_found[] = {
     {"", "\"%s\" 不在。", ""},
     /* SISH_TONE_YANDERE */
     {"お兄ちゃん…", "\"%s\"なんて要らないよ…", "私だけ見て…"}
+};
+
+static const ToneMessage tone_file_not_found_en[] = {
+    /* SISH_TONE_STANDARD */
+    {"Onii-chan! ", "\"%s\" isn't there...", "Check the path!"},
+    /* SISH_TONE_RELIABLE */
+    {"", "\"%s\" does not exist.", "Check the path."},
+    /* SISH_TONE_SWEET */
+    {"Onii-chan... ", "\"%s\" doesn't seem to exist...", "Is the path correct...?"},
+    /* SISH_TONE_QUICK */
+    {"", "\"%s\" missing.", "Check."},
+    /* SISH_TONE_TEACHER */
+    {"Onii-chan, ", "\"%s\" does not exist", "Use an absolute or relative path"},
+    /* SISH_TONE_EMOTIONLESS */
+    {"", "\"%s\" missing.", ""},
+    /* SISH_TONE_YANDERE */
+    {"Onii-chan... ", "You don't need \"%s\"...", "Look at me..."}
 };
 
 /* ========================================
@@ -511,6 +567,86 @@ static const SishErrorTemplate sish_error_templates[SISH_ERR_COUNT] = {
     }
 };
 
+static const SishErrorTemplate sish_error_templates_en[SISH_ERR_COUNT] = {
+    /* SISH_ERR_COMMAND_NOT_FOUND */
+    {
+        "Onii-chan!",
+        "What is \"%s\"? I can't find that command...",
+        "Maybe: %s",
+        SISH_EMOTION_CONFUSED
+    },
+    /* SISH_ERR_PERMISSION_DENIED */
+    {
+        "Um...",
+        "It seems you don't have permission to run \"%s\"...",
+        "Try using sudo!",
+        SISH_EMOTION_SAD
+    },
+    /* SISH_ERR_FILE_NOT_FOUND */
+    {
+        "Huh?",
+        "I can't find the file \"%s\"...",
+        "Check the path!",
+        SISH_EMOTION_CONFUSED
+    },
+    /* SISH_ERR_SYNTAX_ERROR */
+    {
+        "Wait a second!",
+        "The syntax looks wrong... \"%s\"",
+        "Check your brackets and quotes!",
+        SISH_EMOTION_THINKING
+    },
+    /* SISH_ERR_EXEC_FORMAT */
+    {
+        "Hmm...",
+        "\"%s\" doesn't look executable",
+        "Check the file type!",
+        SISH_EMOTION_THINKING
+    },
+    /* SISH_ERR_NO_SUCH_FILE_OR_DIR */
+    {
+        "Huh?",
+        "There's no file or directory named \"%s\"",
+        "Try checking with ls!",
+        SISH_EMOTION_CONFUSED
+    },
+    /* SISH_ERR_IS_DIRECTORY */
+    {
+        "Hey!",
+        "\"%s\" is a directory, not a file!",
+        "Want to cd into it?",
+        SISH_EMOTION_EXCITED
+    },
+    /* SISH_ERR_NOT_DIRECTORY */
+    {
+        "Um...",
+        "\"%s\" isn't a directory",
+        "Check the path!",
+        SISH_EMOTION_CONFUSED
+    },
+    /* SISH_ERR_PIPE_ERROR */
+    {
+        "Oh no...",
+        "Something went wrong with the pipe...",
+        "Check how your commands are connected!",
+        SISH_EMOTION_SAD
+    },
+    /* SISH_ERR_MEMORY_ERROR */
+    {
+        "Oh no!",
+        "It looks like we're out of memory...",
+        "Try closing other processes!",
+        SISH_EMOTION_SAD
+    },
+    /* SISH_ERR_GENERAL */
+    {
+        "Huh?",
+        "Something went wrong... \"%s\"",
+        "Please try again!",
+        SISH_EMOTION_CONFUSED
+    }
+};
+
 /* ========================================
  * Levenshtein Distance Implementation
  * ======================================== */
@@ -572,10 +708,15 @@ sish_levenshtein_distance(const char *s1, const char *s2)
 void
 sish_set_tone(SishTone sish_tone)
 {
-    if (sish_tone >= 0 && sish_tone < SISH_TONE_COUNT) {
-        current_tone = sish_tone;
+    if (sish_tone < 0 || sish_tone >= SISH_TONE_COUNT)
+        return;
+    if (sish_tone == SISH_TONE_TEACHER && !sish_llm_ready()) {
+        current_tone = SISH_TONE_STANDARD;
         tone_initialized = 1;
+        return;
     }
+    current_tone = sish_tone;
+    tone_initialized = 1;
 }
 
 /**/
@@ -583,6 +724,10 @@ SishTone
 sish_get_tone(void)
 {
     sish_init_tone_from_env_once();
+
+    if (current_tone == SISH_TONE_TEACHER && !sish_llm_ready()) {
+        current_tone = SISH_TONE_STANDARD;
+    }
     return current_tone;
 }
 
@@ -590,7 +735,7 @@ sish_get_tone(void)
 const char *
 sish_tone_name(SishTone sish_tone)
 {
-    static const char *names[] = {
+    static const char *names_ja[] = {
         "標準妹モード",
         "しっかり妹モード",
         "甘え妹モード",
@@ -599,10 +744,19 @@ sish_tone_name(SishTone sish_tone)
         "無感情妹モード",
         "ヤンデレ妹モード"
     };
+    static const char *names_en[] = {
+        "Standard Sister",
+        "Reliable Sister",
+        "Sweet Sister",
+        "Impatient Sister",
+        "Teacher Sister",
+        "Emotionless Sister",
+        "Yandere Sister"
+    };
     if (sish_tone >= 0 && sish_tone < SISH_TONE_COUNT) {
-        return names[sish_tone];
+        return sish_lang_is_en() ? names_en[sish_tone] : names_ja[sish_tone];
     }
-    return "不明";
+    return sish_lang_is_en() ? "Unknown" : "不明";
 }
 
 /* ========================================
@@ -727,12 +881,14 @@ sish_print_error(SishErrorType type, const char *cmd, const char *arg)
     if (type >= SISH_ERR_COUNT) {
         type = SISH_ERR_GENERAL;
     }
-    tmpl = &sish_error_templates[type];
+    tmpl = sish_lang_is_en() ? &sish_error_templates_en[type] : &sish_error_templates[type];
     
     /* Print character prefix with color */
-    fprintf(stderr, "%s%s%s：%s",
+        fprintf(stderr, "%s%s%s%s%s",
             SISH_CHAR_COLOR, SISH_COLOR_BOLD,
-            SISH_CHARACTER_NAME, SISH_COLOR_RESET);
+            SISH_CHARACTER_NAME,
+            sish_lang_is_en() ? ":" : "：",
+            SISH_COLOR_RESET);
     
     /* Print error prefix */
     fprintf(stderr, "%s%s%s ",
@@ -748,8 +904,10 @@ sish_print_error(SishErrorType type, const char *cmd, const char *arg)
         suggestions = sish_find_similar_commands(cmd, &suggestion_count);
         
         if (suggestions && suggestion_count > 0) {
-            fprintf(stderr, "%s%s       💡 もしかして: %s",
-                    SISH_CHAR_COLOR, SISH_COLOR_BOLD, SISH_COLOR_RESET);
+            fprintf(stderr, "%s%s       💡 %s%s",
+                SISH_CHAR_COLOR, SISH_COLOR_BOLD,
+                sish_lang_is_en() ? "Maybe: " : "もしかして: ",
+                SISH_COLOR_RESET);
             
             for (int i = 0; i < suggestion_count; i++) {
                 fprintf(stderr, "%s%s%s",
@@ -760,9 +918,11 @@ sish_print_error(SishErrorType type, const char *cmd, const char *arg)
             }
             fprintf(stderr, "\n");
             
-            /* Show hint for first suggestion */
-fprintf(stderr, "%s       ヒント: 正しいコマンドを確認してね！%s\n",
-                    SISH_HINT_COLOR, SISH_COLOR_RESET);
+                /* Show hint */
+                fprintf(stderr, "%s       %s%s\n",
+                    SISH_HINT_COLOR,
+                    sish_lang_is_en() ? "Hint: Please double-check the correct command!" : "ヒント: 正しいコマンドを確認してね！",
+                    SISH_COLOR_RESET);
             
             sish_free_suggestions(suggestions, suggestion_count);
         }
@@ -786,12 +946,20 @@ fprintf(stderr, "%s       ヒント: 正しいコマンドを確認してね！%
 void
 sish_print_suggestion(const char *typed_cmd, const char *suggested_cmd)
 {
-    fprintf(stderr, "%s%s%s：%s",
-            SISH_CHAR_COLOR, SISH_COLOR_BOLD,
-            SISH_CHARACTER_NAME, SISH_COLOR_RESET);
-    fprintf(stderr, "%s\"%s\"%sって、%s\"%s\"%sのこと？\n",
-            SISH_CMD_COLOR, typed_cmd, SISH_COLOR_RESET,
-            SISH_SUGGEST_COLOR, suggested_cmd, SISH_COLOR_RESET);
+    fprintf(stderr, "%s%s%s%s%s",
+        SISH_CHAR_COLOR, SISH_COLOR_BOLD,
+        SISH_CHARACTER_NAME,
+        sish_lang_is_en() ? ":" : "：",
+        SISH_COLOR_RESET);
+    if (sish_lang_is_en()) {
+        fprintf(stderr, "%sDid you mean %s\"%s\"%s?\n",
+                SISH_COLOR_RESET,
+                SISH_SUGGEST_COLOR, suggested_cmd, SISH_COLOR_RESET);
+    } else {
+        fprintf(stderr, "%s\"%s\"%sって、%s\"%s\"%sのこと？\n",
+                SISH_CMD_COLOR, typed_cmd, SISH_COLOR_RESET,
+                SISH_SUGGEST_COLOR, suggested_cmd, SISH_COLOR_RESET);
+    }
 }
 
 /* ========================================
@@ -967,7 +1135,9 @@ sish_llm_query(const char *prompt, char *response, size_t response_size)
 {
     if (!sish_llm_enabled_setting()) {
         if (response && response_size > 0) {
-            snprintf(response, response_size, "LLM統合が無効です。sish-config で有効にしてください。");
+            snprintf(response, response_size, "%s",
+                     SISH_TR("LLM統合が無効です。sish-config で有効にしてください。",
+                             "LLM integration is disabled. Enable it in sish-config."));
         }
         return -1;
     }
@@ -978,7 +1148,9 @@ sish_llm_query(const char *prompt, char *response, size_t response_size)
     
     if (!endpoint || !*endpoint) {
         if (response && response_size > 0) {
-            snprintf(response, response_size, "SISH_LLM_ENDPOINTが設定されていません。");
+            snprintf(response, response_size, "%s",
+                     SISH_TR("SISH_LLM_ENDPOINTが設定されていません。",
+                             "SISH_LLM_ENDPOINT is not set."));
         }
         return -1;
     }
@@ -1008,60 +1180,127 @@ sish_llm_query(const char *prompt, char *response, size_t response_size)
              "{\"model\": \"%s\", \"messages\": [{\"role\": \"user\", \"content\": \"%s\"}], \"max_tokens\": %d}",
              model && *model ? model : "default", escaped_prompt, max_tokens);
     
-    /* このプロセスで外部コマンド curl を使う簡易実装（libcurlを使うには追加ビルド設定が必要） */
-    /* 本格実装ではlibcurlを使うべきですが、今はcurlコマンドで代用 */
+    /* Use curl via system(), but avoid shell-quoting pitfalls by using temp files. */
     char cmd[8192];
-    char tmpfile[256];
-    snprintf(tmpfile, sizeof(tmpfile), "/tmp/sish_llm_response_%d.txt", (int)getpid());
+    char payloadfile[256];
+    char respfile[256];
+    snprintf(payloadfile, sizeof(payloadfile), "/tmp/sish_llm_payload_%d.json", (int)getpid());
+    snprintf(respfile, sizeof(respfile), "/tmp/sish_llm_response_%d.json", (int)getpid());
+
+    FILE *pf = fopen(payloadfile, "w");
+    if (!pf) {
+        snprintf(response, response_size, "%s",
+                 SISH_TR("LLMペイロードの作成に失敗しました。", "Failed to create the LLM request payload."));
+        return -1;
+    }
+    fputs(json_payload, pf);
+    fclose(pf);
+
+    /* Endpoint may already include /v1 */
+    char url[512];
+    if (strstr(endpoint, "/v1") != NULL) {
+        snprintf(url, sizeof(url), "%s/chat/completions", endpoint);
+    } else {
+        snprintf(url, sizeof(url), "%s/v1/chat/completions", endpoint);
+    }
+
     snprintf(cmd, sizeof(cmd),
-             "curl -s -X POST '%s/v1/chat/completions' "
+             "curl --fail --silent --show-error "
+             "--connect-timeout 5 --max-time 20 "
+             "-X POST '%s' "
              "-H 'Content-Type: application/json' "
-             "-d '%s' 2>/dev/null > '%s'",
-             endpoint, json_payload, tmpfile);
-    
+             "--data-binary @'%s' > '%s' 2>/dev/null",
+             url, payloadfile, respfile);
+
     int ret = system(cmd);
     if (ret != 0) {
-        snprintf(response, response_size, "LLMへのリクエストに失敗しました（curl実行エラー）。");
-        (void)unlink(tmpfile);
+        snprintf(response, response_size, "%s",
+                 SISH_TR("LLMへのリクエストに失敗しました（curl実行エラー）。",
+                         "Failed to send request to the LLM (curl error)."));
+        (void)unlink(payloadfile);
+        (void)unlink(respfile);
         return -1;
     }
     
-    FILE *fp = fopen(tmpfile, "r");
+    FILE *fp = fopen(respfile, "r");
     if (!fp) {
-        snprintf(response, response_size, "LLM応答ファイルが開けませんでした。");
-        (void)unlink(tmpfile);
+        snprintf(response, response_size, "%s",
+                 SISH_TR("LLM応答ファイルが開けませんでした。",
+                         "Failed to open the LLM response file."));
+        (void)unlink(payloadfile);
+        (void)unlink(respfile);
         return -1;
     }
     
-    /* 簡易JSON解析：choices[0].message.content を探す */
-    char line[2048];
+    /* Read entire response and extract first "content":"..." with basic unescaping. */
+    char *buf = NULL;
+    size_t cap = 0;
+    size_t used = 0;
+    char chunk[2048];
+    while (fgets(chunk, sizeof(chunk), fp)) {
+        size_t clen = strlen(chunk);
+        if (used + clen + 1 > cap) {
+            size_t ncap = cap ? cap * 2 : 8192;
+            while (ncap < used + clen + 1) ncap *= 2;
+            char *nbuf = realloc(buf, ncap);
+            if (!nbuf) {
+                free(buf);
+                fclose(fp);
+                (void)unlink(payloadfile);
+                (void)unlink(respfile);
+                snprintf(response, response_size, "%s",
+                         SISH_TR("LLM応答の読み取りに失敗しました。", "Failed to read the LLM response."));
+                return -1;
+            }
+            buf = nbuf;
+            cap = ncap;
+        }
+        memcpy(buf + used, chunk, clen);
+        used += clen;
+        buf[used] = '\0';
+    }
+    fclose(fp);
+
+    (void)unlink(payloadfile);
+    (void)unlink(respfile);
+
+    if (!buf) {
+        snprintf(response, response_size, "%s", SISH_TR("LLM応答が空でした。", "The LLM response was empty."));
+        return -1;
+    }
+
     int found = 0;
     response[0] = '\0';
-    while (fgets(line, sizeof(line), fp)) {
-        /* "content":"..." の部分を抜き出す（超簡易） */
-        char *content_start = strstr(line, "\"content\":");
-        if (content_start) {
-            content_start += strlen("\"content\":");
-            while (*content_start && isspace((unsigned char)*content_start)) content_start++;
-            if (*content_start == '"') {
-                content_start++;
-                char *content_end = strchr(content_start, '"');
-                if (content_end) {
-                    size_t len = (size_t)(content_end - content_start);
-                    if (len >= response_size) len = response_size - 1;
-                    memcpy(response, content_start, len);
-                    response[len] = '\0';
-                    found = 1;
-                    break;
+    char *p2 = strstr(buf, "\"content\"");
+    if (p2) {
+        p2 = strchr(p2, ':');
+        if (p2) {
+            p2++;
+            while (*p2 && isspace((unsigned char)*p2)) p2++;
+            if (*p2 == '"') {
+                p2++;
+                size_t out = 0;
+                while (*p2 && out + 1 < response_size) {
+                    if (*p2 == '"') { found = 1; break; }
+                    if (*p2 == '\\') {
+                        p2++;
+                        if (!*p2) break;
+                        if (*p2 == 'n') response[out++] = '\n';
+                        else if (*p2 == 't') response[out++] = '\t';
+                        else response[out++] = *p2;
+                        p2++;
+                        continue;
+                    }
+                    response[out++] = *p2++;
                 }
+                response[out] = '\0';
             }
         }
     }
-    fclose(fp);
-    (void)unlink(tmpfile);
+    free(buf);
     
     if (!found) {
-        snprintf(response, response_size, "LLM応答の解析に失敗しました。");
+        snprintf(response, response_size, "%s", SISH_TR("LLM応答の解析に失敗しました。", "Failed to parse the LLM response."));
         return -1;
     }
     
@@ -1096,21 +1335,31 @@ sish_command_not_found(const char *cmd)
     if (cmd && *cmd) {
         if (!strcmp(cmd, "sl") || !strcmp(cmd, "cowsay") ||
             !strcmp(cmd, "fortune") || !strcmp(cmd, "oneko")) {
-            fprintf(stderr, "%s%s%s：%s", SISH_CHAR_COLOR, SISH_COLOR_BOLD,
-                    SISH_CHARACTER_NAME, SISH_COLOR_RESET);
-            fprintf(stderr, "%sお兄ちゃん！%s", SISH_CHAR_COLOR, SISH_COLOR_RESET);
-            fprintf(stderr, "%s\"%s\"%sが見つからないよ〜。", SISH_CMD_COLOR, cmd, SISH_COLOR_RESET);
-            fprintf(stderr, "%s（入ってなかったらインストールしてね）%s\n",
-                    SISH_HINT_COLOR, SISH_COLOR_RESET);
+            fprintf(stderr, "%s%s%s%s%s", SISH_CHAR_COLOR, SISH_COLOR_BOLD,
+                    SISH_CHARACTER_NAME,
+                    sish_lang_is_en() ? ":" : "：",
+                    SISH_COLOR_RESET);
+            fprintf(stderr, "%s%s%s", SISH_CHAR_COLOR,
+                    SISH_TR("お兄ちゃん！", "Onii-chan!"),
+                    SISH_COLOR_RESET);
+            if (sish_lang_is_en()) {
+                fprintf(stderr, "%s\"%s\"%s is not installed. ", SISH_CMD_COLOR, cmd, SISH_COLOR_RESET);
+                fprintf(stderr, "%s(Please install it if you don't have it)%s\n",
+                        SISH_HINT_COLOR, SISH_COLOR_RESET);
+            } else {
+                fprintf(stderr, "%s\"%s\"%sが見つからないよ〜。", SISH_CMD_COLOR, cmd, SISH_COLOR_RESET);
+                fprintf(stderr, "%s（入ってなかったらインストールしてね）%s\n",
+                        SISH_HINT_COLOR, SISH_COLOR_RESET);
+            }
 
             if (!strcmp(cmd, "sl"))
-                fprintf(stderr, "%s       例: sudo apt install sl%s\n", SISH_HINT_COLOR, SISH_COLOR_RESET);
+                fprintf(stderr, "%s       %s sudo apt install sl%s\n", SISH_HINT_COLOR, sish_lang_is_en() ? "Example:" : "例:", SISH_COLOR_RESET);
             else if (!strcmp(cmd, "cowsay"))
-                fprintf(stderr, "%s       例: sudo apt install cowsay%s\n", SISH_HINT_COLOR, SISH_COLOR_RESET);
+                fprintf(stderr, "%s       %s sudo apt install cowsay%s\n", SISH_HINT_COLOR, sish_lang_is_en() ? "Example:" : "例:", SISH_COLOR_RESET);
             else if (!strcmp(cmd, "fortune"))
-                fprintf(stderr, "%s       例: sudo apt install fortune-mod%s\n", SISH_HINT_COLOR, SISH_COLOR_RESET);
+                fprintf(stderr, "%s       %s sudo apt install fortune-mod%s\n", SISH_HINT_COLOR, sish_lang_is_en() ? "Example:" : "例:", SISH_COLOR_RESET);
             else if (!strcmp(cmd, "oneko"))
-                fprintf(stderr, "%s       例: sudo apt install oneko%s\n", SISH_HINT_COLOR, SISH_COLOR_RESET);
+                fprintf(stderr, "%s       %s sudo apt install oneko%s\n", SISH_HINT_COLOR, sish_lang_is_en() ? "Example:" : "例:", SISH_COLOR_RESET);
 
             fflush(stderr);
             return;
@@ -1127,10 +1376,12 @@ sish_command_not_found(const char *cmd)
         sish_store_last_suggestion(cmd, suggestions[0]);
 
         /* 口調に応じたメッセージ */
-        const ToneMessage *tmsg = &tone_cmd_not_found[sish_get_tone()];
+        const ToneMessage *tmsg = sish_lang_is_en() ? &tone_cmd_not_found_en[sish_get_tone()] : &tone_cmd_not_found[sish_get_tone()];
         
-        fprintf(stderr, "%s%s%s：%s", SISH_CHAR_COLOR, SISH_COLOR_BOLD,
-                SISH_CHARACTER_NAME, SISH_COLOR_RESET);
+        fprintf(stderr, "%s%s%s%s%s", SISH_CHAR_COLOR, SISH_COLOR_BOLD,
+            SISH_CHARACTER_NAME,
+            sish_lang_is_en() ? ":" : "：",
+            SISH_COLOR_RESET);
         
         /* Prefix（呼びかけ）がある場合のみ出力 */
         if (tmsg->prefix && strlen(tmsg->prefix) > 0) {
@@ -1140,20 +1391,50 @@ sish_command_not_found(const char *cmd)
         /* ヒント・提案部分 */
         if (current_tone == SISH_TONE_QUICK) {
             /* せっかち妹：即実行形式 */
+            int will_autorun = 1;
+            const char *quick_hint = tmsg->hint;
+            /* Builtins like `cd` must run in the main shell to have an effect.
+             * Autoru n here can happen in a forked context, so keep it manual.
+             */
+            if (suggestions[0] && !strcmp(suggestions[0], "cd")) {
+                will_autorun = 0;
+                quick_hint = SISH_TR("y って打ってね", "Type y to run");
+            }
+
             fprintf(stderr, "%s%s%s → %s%s%s。%s\n", 
                     SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
                     SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET, 
-                    tmsg->hint);
+                    quick_hint);
+
+            /* Actually run the suggestion (same args) via the y() helper. */
+            if (will_autorun && shfunctab && shfunctab->getnode(shfunctab, "y")) {
+                char *runy = ztrdup("y");
+                execstring(runy, 1, 0, "sish-autorun");
+                zsfree(runy);
+            }
         } else if (current_tone == SISH_TONE_EMOTIONLESS) {
             /* 無感情妹：淡々と */
-            fprintf(stderr, "%s%s%s 不明。%s%s%s 提案。\n", 
-                    SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
-                    SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+            if (sish_lang_is_en()) {
+                fprintf(stderr, "%s%s%s unknown. %s%s%s suggested.\n",
+                        SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
+                        SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+            } else {
+                fprintf(stderr, "%s%s%s 不明。%s%s%s 提案。\n", 
+                        SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
+                        SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+            }
         } else if (current_tone == SISH_TONE_YANDERE) {
             /* ヤンデレ妹：決め打ち */
-            fprintf(stderr, "%s%s%sなんて使わないで…%s%s%sだけ使って…絶対に…\n",
-                    SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
-                    SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+            if (sish_lang_is_en()) {
+                fprintf(stderr, "%sDon't use %s\"%s\"%s... Use only %s\"%s\"%s... absolutely...\n",
+                        SISH_CMD_COLOR,
+                        SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
+                        SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+            } else {
+                fprintf(stderr, "%s%s%sなんて使わないで…%s%s%sだけ使って…絶対に…\n",
+                        SISH_CMD_COLOR, cmd, SISH_COLOR_RESET,
+                        SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+            }
         } else {
             /* その他の口調：コマンド名から始める */
             /* メインメッセージ */
@@ -1161,23 +1442,37 @@ sish_command_not_found(const char *cmd)
             
             if (current_tone == SISH_TONE_RELIABLE) {
                 /* しっかり妹：断定的 */
-                fprintf(stderr, " は存在しない。%s%s%s を実行する？\n", 
+                if (sish_lang_is_en()) {
+                    fprintf(stderr, " does not exist. %s%s%s?\n",
                         SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+                } else {
+                    fprintf(stderr, " は存在しない。%s%s%s を実行する？\n", 
+                        SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+                }
             } else if (current_tone == SISH_TONE_SWEET) {
                 /* 甘え妹：弱気 */
-                fprintf(stderr, "って無いみたい…\n");
-                fprintf(stderr, "%s       %s%s%sなら、あるよ…？%s\n",
-                        SISH_HINT_COLOR, SISH_SUGGEST_COLOR, suggestions[0], 
-                        SISH_COLOR_RESET, SISH_COLOR_RESET);
+                fprintf(stderr, "%s\n", sish_lang_is_en() ? "... doesn't seem to exist..." : "って無いみたい…");
+                fprintf(stderr, "%s       %s%s%s%s\n",
+                    SISH_HINT_COLOR,
+                    SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET,
+                    sish_lang_is_en() ? " exists... maybe...?" : "なら、あるよ…？");
             } else if (current_tone == SISH_TONE_TEACHER) {
                 /* 教え上手妹：説明追加 */
-                fprintf(stderr, "はコマンドに無いよ\n");
-                fprintf(stderr, "%s       もしかして: %s%s%s\n",
-                        SISH_HINT_COLOR, SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+                fprintf(stderr, "%s\n", sish_lang_is_en() ? " isn't a command" : "はコマンドに無いよ");
+                fprintf(stderr, "%s       %s%s%s%s\n",
+                    SISH_HINT_COLOR,
+                    sish_lang_is_en() ? "Maybe: " : "もしかして: ",
+                    SISH_SUGGEST_COLOR, suggestions[0],
+                    SISH_COLOR_RESET);
             } else {
                 /* 標準妹：デフォルト */
-                fprintf(stderr, "って無いよ…%s%s%sの間違いじゃない？\n",
+                if (sish_lang_is_en()) {
+                    fprintf(stderr, " isn't a command... %s%s%s?\n",
                         SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+                } else {
+                    fprintf(stderr, "って無いよ…%s%s%sの間違いじゃない？\n",
+                        SISH_SUGGEST_COLOR, suggestions[0], SISH_COLOR_RESET);
+                }
             }
         }
 
@@ -1186,7 +1481,9 @@ sish_command_not_found(const char *cmd)
             (current_tone == SISH_TONE_STANDARD || 
              current_tone == SISH_TONE_TEACHER ||
              current_tone == SISH_TONE_RELIABLE)) {
-            fprintf(stderr, "%s       ほかにも: %s", SISH_HINT_COLOR, SISH_COLOR_RESET);
+            fprintf(stderr, "%s       %s%s", SISH_HINT_COLOR,
+                    sish_lang_is_en() ? "Other options: " : "ほかにも: ",
+                    SISH_COLOR_RESET);
             for (int i = 1; i < suggestion_count; i++) {
                 fprintf(stderr, "%s%s%s", SISH_SUGGEST_COLOR, suggestions[i], SISH_COLOR_RESET);
                 if (i < suggestion_count - 1) fprintf(stderr, ", ");
@@ -1281,17 +1578,33 @@ sish_cd_not_found(const char *dest)
         closedir(dirp);
     }
 
-    fprintf(stderr, "%s%s%s：%s", SISH_CHAR_COLOR, SISH_COLOR_BOLD,
-            SISH_CHARACTER_NAME, SISH_COLOR_RESET);
-    fprintf(stderr, "%sお兄ちゃん！%s", SISH_CHAR_COLOR, SISH_COLOR_RESET);
-    fprintf(stderr, "%s\"%s\"%sってディレクトリが見つからないよ？ ",
+        fprintf(stderr, "%s%s%s%s%s", SISH_CHAR_COLOR, SISH_COLOR_BOLD,
+            SISH_CHARACTER_NAME,
+            sish_lang_is_en() ? ":" : "：",
+            SISH_COLOR_RESET);
+        fprintf(stderr, "%s%s%s", SISH_CHAR_COLOR,
+            SISH_TR("お兄ちゃん！", "Onii-chan!"),
+            SISH_COLOR_RESET);
+        if (sish_lang_is_en()) {
+        fprintf(stderr, "%s\"%s\"%s directory not found. ",
             SISH_CMD_COLOR, dest, SISH_COLOR_RESET);
+        } else {
+        fprintf(stderr, "%s\"%s\"%sってディレクトリが見つからないよ？ ",
+            SISH_CMD_COLOR, dest, SISH_COLOR_RESET);
+        }
 
     if (best[0]) {
-        fprintf(stderr, "%s\"%s\"%sの間違いじゃない？%s\n",
-                SISH_SUGGEST_COLOR, best[0], SISH_COLOR_RESET, SISH_COLOR_RESET);
-        fprintf(stderr, "%s       それっぽいフォルダ: %s%s%s",
+        if (sish_lang_is_en()) {
+            fprintf(stderr, "%sDid you mean \"%s\"?%s\n",
+                SISH_SUGGEST_COLOR, best[0], SISH_COLOR_RESET);
+            fprintf(stderr, "%s       Similar folders: %s%s%s",
                 SISH_HINT_COLOR, SISH_SUGGEST_COLOR, best[0], SISH_COLOR_RESET);
+        } else {
+            fprintf(stderr, "%s\"%s\"%sの間違いじゃない？%s\n",
+                SISH_SUGGEST_COLOR, best[0], SISH_COLOR_RESET, SISH_COLOR_RESET);
+            fprintf(stderr, "%s       それっぽいフォルダ: %s%s%s",
+                SISH_HINT_COLOR, SISH_SUGGEST_COLOR, best[0], SISH_COLOR_RESET);
+        }
         if (best[1]) {
             fprintf(stderr, ", %s%s%s", SISH_SUGGEST_COLOR, best[1], SISH_COLOR_RESET);
         }
@@ -1299,11 +1612,15 @@ sish_cd_not_found(const char *dest)
             fprintf(stderr, ", %s%s%s", SISH_SUGGEST_COLOR, best[2], SISH_COLOR_RESET);
         }
         fprintf(stderr, "\n");
-        fprintf(stderr, "%s       ヒント: パスを確認してね！%s\n",
-                SISH_HINT_COLOR, SISH_COLOR_RESET);
+        fprintf(stderr, "%s       %s%s\n",
+            SISH_HINT_COLOR,
+            sish_lang_is_en() ? "Hint: Please check the path!" : "ヒント: パスを確認してね！",
+            SISH_COLOR_RESET);
     } else {
-        fprintf(stderr, "%sここにはそれっぽいフォルダ無かった…%s\n",
-                SISH_HINT_COLOR, SISH_COLOR_RESET);
+        fprintf(stderr, "%s%s%s\n",
+            SISH_HINT_COLOR,
+            sish_lang_is_en() ? "No similar folders found here..." : "ここにはそれっぽいフォルダ無かった…",
+            SISH_COLOR_RESET);
     }
 
     fflush(stderr);

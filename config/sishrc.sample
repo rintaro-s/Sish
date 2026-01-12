@@ -3,6 +3,13 @@
 # Place in ~/.sishrc
 
 # ========================================
+# Language Configuration / 言語設定
+# ========================================
+# Language for messages (ja=Japanese, en=English)
+# メッセージの言語 (ja=日本語, en=英語)
+export SISH_LANG="ja"
+
+# ========================================
 # LLM Integration (Optional)
 # ========================================
 # Uncomment and set to enable LLM features
@@ -17,12 +24,6 @@ export SISH_CHARACTER_NAME="Sish"
 
 # Enable/disable character messages (1=on, 0=off)
 export SISH_CHARACTER_ENABLED=1
-
-# ========================================
-# Error Message Language
-# ========================================
-# Language for error messages (ja=Japanese, en=English)
-export SISH_LANG="ja"
 
 # ========================================
 # Command Suggestions

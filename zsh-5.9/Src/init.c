@@ -1792,8 +1792,12 @@ zsh_main(UNUSED(int argc), char **argv)
     
     /* Print Sish welcome message */
     if (interact && !isset(SHINSTDIN)) {
-        fprintf(stderr, "%s%sSish%s：お帰り！お兄ちゃん！今日も一緒にがんばろうね！%s\n",
-                SISH_CHAR_COLOR, SISH_COLOR_BOLD, SISH_COLOR_RESET, SISH_COLOR_RESET);
+		fprintf(stderr, "%s%sSish%s%s%s\n",
+			SISH_CHAR_COLOR,
+			SISH_COLOR_BOLD,
+			SISH_COLOR_RESET,
+			sish_lang_is_en() ? ": Welcome back! Let's do our best today!" : "：お帰り！お兄ちゃん！今日も一緒にがんばろうね！",
+			SISH_COLOR_RESET);
     }
 
     for (;;) {
@@ -1840,6 +1844,7 @@ zsh_main(UNUSED(int argc), char **argv)
 	 * the display tidy.
 	 */
 	if (!use_exit_printed)
-	    sish_zerrnam("Sish", "ちょっと！まだ帰らないで！'exit'で退出できるよ！");
+	    sish_zerrnam("Sish", SISH_TR("ちょっと！まだ帰らないで！'exit'で退出できるよ！",
+	                                 "Hey! Don't leave yet! You can exit with 'exit'."));
     }
 }

@@ -229,6 +229,12 @@ sish_translate_error(const char *msg)
     
     if (!msg) return NULL;
 
+    /* English mode: do not translate into Japanese (avoid mixed output). */
+    if (sish_lang_is_en()) {
+        snprintf(buf, sizeof(buf), "%s%s%s", SISH_ERROR_COLOR, msg, SISH_COLOR_RESET);
+        return buf;
+    }
+
     SishTone sish_tone = sish_get_tone();
     
     /* パターンマッチング */
@@ -359,8 +365,11 @@ sish_zerr(const char *fmt, ...)
     zsfree(raw);
     
     /* キャラクター付きで出力 */
-    fprintf(stderr, "%s%sSish%s：", 
-            SISH_CHAR_COLOR, SISH_COLOR_BOLD, SISH_COLOR_RESET);
+        fprintf(stderr, "%s%sSish%s%s", 
+            SISH_CHAR_COLOR,
+            SISH_COLOR_BOLD,
+            SISH_COLOR_RESET,
+            sish_lang_is_en() ? ":" : "：");
     fprintf(stderr, "%s\n", translated);
         fflush(stderr);
     
@@ -392,8 +401,12 @@ sish_zerrnam(const char *cmd, const char *fmt, ...)
     zsfree(raw);
     
     /* コマンド名付きで出力 */
-    fprintf(stderr, "%s%s%s%s：", 
-            SISH_CMD_COLOR, cmd, SISH_COLOR_RESET, SISH_CHAR_COLOR);
+        fprintf(stderr, "%s%s%s%s%s", 
+            SISH_CMD_COLOR,
+            cmd,
+            SISH_COLOR_RESET,
+            SISH_CHAR_COLOR,
+            sish_lang_is_en() ? ":" : "：");
     fprintf(stderr, "%s\n", translated);
         fflush(stderr);
     

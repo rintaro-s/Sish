@@ -7,20 +7,34 @@ DEFAULT_BUILT_SISH_PATH="$SCRIPT_DIR/zsh-5.9/Src/zsh"
 DEFAULT_INSTALLED_SISH_PATH="$SCRIPT_DIR/zsh-5.9/install/bin/zsh"
 
 # Allow overriding the zsh binary path.
-# Prefer an explicit env var, then in-repo install, then in-repo build artifact.
+# Prefer an explicit env var, then the newer of (in-repo build artifact, in-repo install).
 SISH_PATH="${SISH_PATH:-}"
 if [[ -z "$SISH_PATH" ]]; then
-    if [[ -x "$DEFAULT_INSTALLED_SISH_PATH" ]]; then
-        SISH_PATH="$DEFAULT_INSTALLED_SISH_PATH"
+    if [[ -x "$DEFAULT_BUILT_SISH_PATH" && -x "$DEFAULT_INSTALLED_SISH_PATH" ]]; then
+        if [[ "$DEFAULT_BUILT_SISH_PATH" -nt "$DEFAULT_INSTALLED_SISH_PATH" ]]; then
+            SISH_PATH="$DEFAULT_BUILT_SISH_PATH"
+        else
+            SISH_PATH="$DEFAULT_INSTALLED_SISH_PATH"
+        fi
     elif [[ -x "$DEFAULT_BUILT_SISH_PATH" ]]; then
         SISH_PATH="$DEFAULT_BUILT_SISH_PATH"
+    elif [[ -x "$DEFAULT_INSTALLED_SISH_PATH" ]]; then
+        SISH_PATH="$DEFAULT_INSTALLED_SISH_PATH"
     fi
 fi
 SISH_CONFIG="$SCRIPT_DIR/config/sishrc"
 
+# Default language
+: ${SISH_LANG:=ja}
+
 if [[ ! -x "$SISH_PATH" ]]; then
-    echo "Sish: 実行ファイルが見つからないよ: $SISH_PATH" >&2
-    echo "ヒント: $SCRIPT_DIR/zsh-5.9 で make を実行してね（または SISH_PATH=/path/to/zsh を設定）" >&2
+    if [[ "$SISH_LANG" == "en" ]]; then
+        echo "Sish: Executable not found: $SISH_PATH" >&2
+        echo "Hint: Run make in $SCRIPT_DIR/zsh-5.9 (or set SISH_PATH=/path/to/zsh)" >&2
+    else
+        echo "Sish: 実行ファイルが見つからないよ: $SISH_PATH" >&2
+        echo "ヒント: $SCRIPT_DIR/zsh-5.9 で make を実行してね（または SISH_PATH=/path/to/zsh を設定）" >&2
+    fi
     exit 127
 fi
 
@@ -35,9 +49,18 @@ trap cleanup EXIT
 cat > "$DOTDIR/.zshrc" << 'EOFRC'
 # Sish temporary .zshrc (isolated via ZDOTDIR)
 
+# Ensure zsh modules (e.g., zsh/zle) can be loaded even when zsh is not installed system-wide.
+# This is replaced by the launcher with an in-repo module directory when available.
+if [[ -n "${SISH_ZSH_MODULE_DIR:-}" && -d "$SISH_ZSH_MODULE_DIR" ]]; then
+    module_path=("$SISH_ZSH_MODULE_DIR" $module_path)
+fi
+
+# Set i18n path for the embedded zsh session
+export SISH_I18N_PATH="SISH_I18N_PATH_PLACEHOLDER"
+
 # 環境変数で既に設定されている値を保護
 typeset -A sish_env_overrides
-for var in SISH_TONE SISH_THEME SISH_ERROR_VERBOSITY \
+for var in SISH_LANG SISH_TONE SISH_THEME SISH_ERROR_VERBOSITY \
            SISH_CHAR_NAME SISH_CHAR_EXPRESSION SISH_CHAR_POSITION SISH_CHAR_SIZE SISH_CHAR_ANIMATION \
            SISH_COMPLETION_ENABLE SISH_COMPLETION_FUZZY SISH_COMPLETION_MAX_CANDIDATES \
            SISH_COMPLETION_DIR_SIMILARITY SISH_COMPLETION_HISTORY \
@@ -48,9 +71,17 @@ for var in SISH_TONE SISH_THEME SISH_ERROR_VERBOSITY \
     fi
 done
 
-# Load user's sishrc first to get SISH_TONE early
+# Load user's sishrc first to get SISH_TONE and SISH_LANG early
 if [[ -f "$HOME/.sishrc" ]]; then
     source "$HOME/.sishrc"
+fi
+
+# Load internationalization support
+# First check user's .sish directory, then fall back to the script's config directory
+if [[ -f "$HOME/.sish/i18n.zsh" ]]; then
+    source "$HOME/.sish/i18n.zsh"
+elif [[ -n "${SISH_I18N_PATH:-}" && -f "$SISH_I18N_PATH" ]]; then
+    source "$SISH_I18N_PATH"
 fi
 
 # 環境変数で指定された値で上書き
@@ -69,7 +100,12 @@ HISTFILE=~/.sish_history
 HISTSIZE=10000
 SAVEHIST=10000
 
-PROMPT='%F{213}Sish%f:%F{111}%~%f %# '
+# Setup prompt (can be customized per language)
+if type sish_setup_prompt >/dev/null 2>&1; then
+    sish_setup_prompt
+else
+    PROMPT='%F{213}Sish%f:%F{111}%~%f %# '
+fi
 
 # 補完（Tab）
 autoload -Uz compinit
@@ -122,7 +158,11 @@ cd_with_correction() {
                 elif (( ${#full_candidates} > 1 )); then
                     local cand="${full_candidates[1]}"
                     echo "$cand" > "/tmp/sish-last-dir-$$"
-                    print -r -- "Sish：お兄ちゃん！「$target」は無かったよ… もしかして「${cand#$PWD/}」のこと？"
+                    if type sish_msg >/dev/null 2>&1; then
+                        sish_msg "dir_not_found_maybe" "$target" "${cand#$PWD/}"
+                    else
+                        print -r -- "Sish：お兄ちゃん！「$target」は無かったよ… もしかして「${cand#$PWD/}」のこと？"
+                    fi
                     return 1
                 fi
             fi
@@ -154,9 +194,15 @@ cd_with_correction() {
         elif (( ${#candidates} > 1 )); then
             local cand="${candidates[1]}"
             echo "$cand" > "/tmp/sish-last-dir-$$"
-            print -r -- "Sish：お兄ちゃん！「$target」は無かったよ… 「${cand##*/}」の間違いじゃない？"
-            print -r -- "       それっぽいフォルダ: ${cand##*/}"
-            print -r -- "       ヒント: パスを確認してね！"
+            if type sish_msg >/dev/null 2>&1; then
+                sish_msg "dir_not_found" "$target" "${cand##*/}"
+                sish_msg "dir_similar_folders" "${cand##*/}"
+                sish_msg "dir_hint"
+            else
+                print -r -- "Sish：お兄ちゃん！「$target」は無かったよ… 「${cand##*/}」の間違いじゃない？"
+                print -r -- "       それっぽいフォルダ: ${cand##*/}"
+                print -r -- "       ヒント: パスを確認してね！"
+            fi
             return 1
         fi
     fi
@@ -171,7 +217,10 @@ alias cd='cd_with_correction'
 # 未定義コマンド提案を即実行
 y() {
     local f="/tmp/sish-last-suggestion-$$"
-    local af="/tmp/sish-last-args-$$"
+    local pf=""
+    [[ -n "${PPID:-}" ]] && pf="/tmp/sish-last-suggestion-$PPID"
+
+    local pid_for_suggestion="$$"
     local df="/tmp/sish-last-dir-$$"  # ディレクトリ補正用
     local sug=""
     
@@ -185,7 +234,11 @@ y() {
         fi
     fi
     
-    if [[ -r "$f" ]]; then
+    if [[ -n "$pf" && -r "$pf" ]]; then
+        pid_for_suggestion="$PPID"
+        sug="$(< "$pf")"
+        rm -f "$pf" 2>/dev/null || true
+    elif [[ -r "$f" ]]; then
         sug="$(< "$f")"
         rm -f "$f" 2>/dev/null || true
     else
@@ -197,19 +250,24 @@ y() {
         # Split like a shell command line, without evaluating it.
         words=( ${(z)sug} )
         if (( ${#words} == 0 )); then
-            print -r -- "Sish：お兄ちゃん、候補が空っぽだった…"
+            if type sish_msg >/dev/null 2>&1; then
+                sish_msg "y_empty_suggestion"
+            else
+                print -r -- "Sish：お兄ちゃん、候補が空っぽだった…"
+            fi
             return 1
         fi
 
         # If suggestion is only a command name, inherit args from the original command.
         # Example: `hit clone` -> suggestion `git` -> run `git clone`.
         if (( ${#words} == 1 )) && (( $# == 0 )); then
+            local af="/tmp/sish-last-args-${pid_for_suggestion}"
             if [[ -r "$af" ]]; then
                 local -a saved_args
                 saved_args=( ${(f)"$(< "$af")"} )
                 rm -f "$af" 2>/dev/null || true
                 if (( ${#saved_args} )); then
-                    command "${words[@]}" "${saved_args[@]}"
+                    "${words[@]}" "${saved_args[@]}"
                     return $?
                 fi
             fi
@@ -220,15 +278,19 @@ y() {
                 local -a prev_words
                 prev_words=( ${(z)prev} )
                 if (( ${#prev_words} >= 2 )); then
-                    command "${words[@]}" "${prev_words[@]:1}"
+                    "${words[@]}" "${prev_words[@]:1}"
                     return $?
                 fi
             fi
         fi
 
-        command "${words[@]}" "$@"
+        "${words[@]}" "$@"
     else
-        print -r -- "Sish：お兄ちゃん、いま実行できる候補が無いよ…"
+        if type sish_msg >/dev/null 2>&1; then
+            sish_msg "y_no_suggestion"
+        else
+            print -r -- "Sish：お兄ちゃん、いま実行できる候補が無いよ…"
+        fi
         return 1
     fi
 }
@@ -285,7 +347,11 @@ cat() {
         fi
         # Use the same per-process temp file that `y` consumes, to avoid stale suggestions.
         print -r -- "$SISH_LAST_SUGGESTION" >| "/tmp/sish-last-suggestion-$$" 2>/dev/null || true
-        print -r -- "Sish：お兄ちゃん！\"${files[1]}\" は無かったよ… もしかして\"$cand\" のこと？"
+        if type sish_msg >/dev/null 2>&1; then
+            sish_msg "void_file_not_found" "${files[1]}" "$cand"
+        else
+            print -r -- "Sish：お兄ちゃん！\"${files[1]}\" は無かったよ… もしかして\"$cand\" のこと？"
+        fi
         return 1
     fi
 
@@ -297,11 +363,19 @@ summon() { command git clone -- "$@"; }
 
 void() {
     if [[ $# -lt 1 ]]; then
-        print -r -- "Sish：お兄ちゃん、voidは消したいパスを指定してね！（例: void ./tmp）"
+        if type sish_msg >/dev/null 2>&1; then
+            sish_msg "void_usage"
+        else
+            print -r -- "Sish：お兄ちゃん、voidは消したいパスを指定してね！（例: void ./tmp）"
+        fi
         return 2
     fi
     if [[ "$1" == "/" ]]; then
-        print -r -- "Sish：それはダメ！ '/' は消しちゃだめ！"
+        if type sish_msg >/dev/null 2>&1; then
+            sish_msg "void_root_warning"
+        else
+            print -r -- "Sish：それはダメ！ '/' は消しちゃだめ！"
+        fi
         return 1
     fi
     command rm -rf -- "$@"
@@ -311,7 +385,11 @@ fiat() {
     if (( EUID == 0 )); then
         command -- "$@"
     else
-        print -r -- "Sish：お兄ちゃん、fiatはSishが管理者で動いてる時だけパスワードレスだよ…（sudoで実行するね）"
+        if type sish_msg >/dev/null 2>&1; then
+            sish_msg "fiat_using_sudo"
+        else
+            print -r -- "Sish：お兄ちゃん、fiatはSishが管理者で動いてる時だけパスワードレスだよ…（sudoで実行するね）"
+        fi
         command sudo -- "$@"
     fi
 }
@@ -320,7 +398,11 @@ gaze() { command ls -lahFt --color=auto -- "$@"; }
 
 lore() {
     if [[ $# -ne 1 ]]; then
-        print -r -- "Sish：loreは1つだけ指定してね！（例: lore myfile）"
+        if type sish_msg >/dev/null 2>&1; then
+            sish_msg "lore_usage"
+        else
+            print -r -- "Sish：loreは1つだけ指定してね！（例: lore myfile）"
+        fi
         return 2
     fi
     command cp -a -- "$1" "$1.back"
@@ -328,7 +410,11 @@ lore() {
 
 node() {
     if [[ $# -lt 1 ]]; then
-        print -r -- "Sish：nodeは2つの候補ディレクトリを渡してね！（例: node hoge foo）"
+        if type sish_msg >/dev/null 2>&1; then
+            sish_msg "node_usage"
+        else
+            print -r -- "Sish：nodeは2つの候補ディレクトリを渡してね！（例: node hoge foo）"
+        fi
         return 2
     fi
     if [[ -d "$1" ]]; then
@@ -339,7 +425,11 @@ node() {
         builtin cd -- "$2"
         return $?
     fi
-    print -r -- "Sish：お兄ちゃん、どっちもフォルダじゃなかった…"
+    if type sish_msg >/dev/null 2>&1; then
+        sish_msg "node_not_directory"
+    else
+        print -r -- "Sish：お兄ちゃん、どっちもフォルダじゃなかった…"
+    fi
     return 1
 }
 
@@ -363,17 +453,35 @@ fi
 
 # 対話モードのみウェルカムメッセージを表示
 if [[ -o interactive ]]; then
-    echo "🌸 Sish - Sister Shell"
-    echo "💡 ヒント: sish-config で設定メニュー"
+    if [[ "$SISH_LANG" == "en" ]]; then
+        echo "🌸 Sish - Sister Shell"
+        echo "💡 Hint: Type sish-config for settings menu"
+    else
+        echo "🌸 Sish - Sister Shell"
+        echo "💡 ヒント: sish-config で設定メニュー"
+    fi
     echo ""
 fi
 EOFRC
+
+# Replace the placeholder with actual i18n path
+I18N_FILE="$SCRIPT_DIR/config/sish_i18n.zsh"
+if [[ -f "$I18N_FILE" ]]; then
+    sed -i "s|SISH_I18N_PATH_PLACEHOLDER|$I18N_FILE|g" "$DOTDIR/.zshrc"
+fi
 
 if [[ -f "$SISH_CONFIG" ]]; then
     cat "$SISH_CONFIG" >> "$DOTDIR/.zshrc"
 fi
 
 export ZDOTDIR="$DOTDIR"
+
+# Provide module directory to the embedded zsh via env var.
+SISH_ZSH_MODULE_DIR=""
+if [[ -d "$SCRIPT_DIR/zsh-5.9/install/lib/zsh/5.9" ]]; then
+    SISH_ZSH_MODULE_DIR="$SCRIPT_DIR/zsh-5.9/install/lib/zsh/5.9"
+fi
+export SISH_ZSH_MODULE_DIR
 
 # argv[0] を "Sish" にして、メッセージの見た目も統一する
 # NOTE: zshは非対話モードでは .zshrc を読まないが、Sishは常に読ませたいので、

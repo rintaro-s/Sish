@@ -1,9 +1,13 @@
 
 ## English Guide (Sister Shell)
 
-**Escape the dull "black screen"—a Japanese shell environment with a cute little sister personality.**
+**Escape the dull "black screen"—a shell environment with a cute little sister personality.**
 
 > *Translated by GPT-4.1. Please refer to the original Japanese text above for reference.*
+
+> *Most of the project has been translated, but there may still be some mistakes or untranslated parts.*
+
+**Introduction Page：[https://rintaro-s.github.io/Sish/](https://rintaro-s.github.io/Sish/)**  
 
 ---
 
@@ -63,10 +67,6 @@ Sish: Onii-chan! "Github" doesn't exist… Did you mean "GitHub"?
          Similar folders: GitHub
          Hint: Please check the path!
 
-Sish:~/Documents/github/Sish % yy
-Sish: Onii-chan! "yy" isn't a command… Did you mean "hg"?
-         Other options: yum, ls, cd, cp
-
 Sish:~/Documents/github/Sish % y
 Sish:~/Documents/github/Sish/GitHub %
 ```
@@ -84,17 +84,24 @@ Sish:~/Documents/github/Sish % cd github
 Sish:~/Documents/github/Sish/github %
 ```
 
-#### Japanese error messages
-```bash
-Sish:~/Documents/github/Sish/GitHub % echo $((10 / 0))
-Sish: 💡 You're trying to divide by zero!
-         Please use a number other than 0!
-```
-
 #### Settings menu
 ```bash
 $ sish-config
-# → Opens interactive settings menu
+╔═══════════════════════════════════════════════════════════════╗
+║          Sish Settings Menu - I'll match your preferences!    ║
+╚═══════════════════════════════════════════════════════════════╝
+
+   1. Theme Color
+   2. Tone / Personality
+   3. Character (includes Language)
+   4. Shortcuts
+   5. Completion
+   6. LLM Integration
+   7. Error Verbosity
+   8. GUI Integration
+   9. Reset Settings
+ ▶ 0. Save & Exit 
+
 ```
 #### Full zsh compatibility
 ```bash
@@ -171,7 +178,7 @@ Sish has several "Sister Roles (Modes)". You can switch the sister's personality
 | Standard Sister | Honest, caring | Sish: Onii-chan! There's no "hit"... You meant "git", right? |
 | Reliable Sister | Capable, decisive | Sish: "hit" does not exist. Execute "git" instead?|
 | Spoiled Sister | Clingy, a bit timid | Sish: Onii-chan... "hit" isn't there... but "git" is... maybe...? |
-| Impatient Sister | Quick, no preamble | Sish: "hit" -> "git". Executing now! |
+| Impatient Sister | Quick, no preamble .(Run the candidate without authentication.)| Sish: "hit" -> "git". Executing now! |
 | Tutor Sister | Good at explaining | Sish: Onii-chan, "hit" isn't a command. "git" is for version control! |
 | Null Sister | Quiet, no emotion | Sish: "hit" unknown. "git" suggested. |
 | Yandere(Obsessive) Sister | Possessive, forceful | Sish: Onii-chan... don't use "hit"... only use "git"... promise me... forever... |

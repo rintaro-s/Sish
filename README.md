@@ -16,6 +16,9 @@
 ```bash
 cd Sish
 
+# First time only (builds Sish zsh locally)
+./setup.sh
+
 # Method 1: Startup script
 ./sish
 

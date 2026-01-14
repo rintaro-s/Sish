@@ -188,6 +188,26 @@ Sish has several "Sister Roles (Modes)". You can switch the sister's personality
 
 
 
+## Useful Installation Commands
+
+### 1. Run Sish immediately after cloning (no global install, works inside repo)
+
+```bash
+git clone https://github.com/rintaro-s/Sish.git && cd Sish && cd zsh-5.9 && ./Util/preconfig && ./configure --prefix="$PWD/install" && make -j"$(nproc)" && make install.bin install.modules install.fns && cd .. && SISH_LANG=en ./sish
+```
+
+### 2. Fix zsh/zle errors in an existing clone (e.g. `/tmp/Sish`)
+
+```bash
+cd /tmp/Sish && rm -rf install && cd zsh-5.9 && (test -f Makefile && make distclean || true) && ./Util/preconfig && ./configure --prefix="$PWD/install" && make -j"$(nproc)" && make install.bin install.modules install.fns && cd .. && SISH_LANG=en ./sish
+```
+
+### 3. Use Sish anywhere (global install for your user)
+
+```bash
+git clone https://github.com/rintaro-s/Sish.git ~/.local/share/Sish && cd ~/.local/share/Sish && cd zsh-5.9 && ./Util/preconfig && ./configure --prefix="$PWD/install" && make -j"$(nproc)" && make install.bin install.modules install.fns && cd .. && mkdir -p ~/.local/bin && ln -sf "$PWD/sish" sish && export PATH="$HOME/.local/bin:$PATH" && SISH_LANG=en sish
+```
+
 
 # Sish - Sister Shell
 

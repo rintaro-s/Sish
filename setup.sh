@@ -109,6 +109,16 @@ else
     exit 4
 fi
 
+
+# --- Always show recommended install commands for all features ---
+info "\nRecommended install commands (Ubuntu/Debian):"
+echo "  # For Sish core (TUI only):"
+echo "  sudo apt-get update && sudo apt-get install -y build-essential autoconf pkg-config libncursesw5-dev"
+echo "\n  # For Sish-Console (GUI, Rust/GTK4):"
+echo "  sudo apt-get install -y cargo libgtk-4-dev libvte-2.91-gtk4-dev libgraphene-1.0-dev libcairo2-dev libpango1.0-dev"
+echo "\n  # For translation (translate.py):"
+echo "  sudo apt-get install -y python3-pip && pip3 install ctranslate2 transformers"
+
 success "Environment check complete"
 echo
 

@@ -9,63 +9,75 @@ cd "$SCRIPT_DIR"
 
 # ---- Preflight: check required tools (no sudo / no system install) ----
 missing=()
-for cmd in gcc clang make autoconf autoheader pkg-config; do
+# Accept any of these C/C++ compilers
+compilers=(gcc clang cc c99 c89 tcc icc icx zig clang-cl cl xlc pgcc c++)
+found_compiler=""
+for c in "${compilers[@]}"; do
+    if command -v "$c" >/dev/null 2>&1; then
+        found_compiler="$c"
+        break
+    fi
+done
+if [[ -z "$found_compiler" ]]; then
+    missing+=("C compiler (gcc/clang/cc/c99/c89/tcc/icc/icx/zig/clang-cl/cl/xlc/pgcc/c++)")
+fi
+for cmd in make autoconf autoheader pkg-config; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
 done
 
 if (( ${#missing[@]} > 0 )); then
-    echo "❌ ビルドに必要なツールが足りないよ: ${missing[*]}" >&2
-    echo "ヒント: Debian/Ubuntu 系なら sudo apt-get update && sudo apt-get install -y build-essential autoconf pkg-config libncursesw5-dev" >&2
+    echo "❌ Missing required build tools: ${missing[*]}" >&2
+    echo "Hint: On Debian/Ubuntu, try: sudo apt-get update && sudo apt-get install -y build-essential autoconf pkg-config libncurses-dev" >&2
     exit 1
 fi
 
-# ncursesw (wide-char) が無いと zle がリンクに失敗するので事前チェック
-if ! pkg-config --exists ncursesw; then
-    echo "❌ ncursesw (libncursesw5-dev 相当) が見つからないよ" >&2
-    echo "ヒント: Debian/Ubuntu 系なら sudo apt-get install -y libncursesw5-dev" >&2
+# ncursesw (wide-char) is required for zle, check for it
+if ! pkg-config --exists ncursesw && ! pkg-config --exists ncurses; then
+    echo "❌ ncursesw (libncursesw5-dev or libncurses-dev) not found" >&2
+    echo "Hint: On Debian/Ubuntu, try: sudo apt-get install -y libncursesw5-dev or libncurses-dev" >&2
     exit 1
 fi
 
 # ---- Detect already-installed local zsh ----
-# zsh-5.9 が既にセットアップされているかチェック（リポジトリ内のローカル install）
+# Check if zsh-5.9 is already built and installed locally
 if [[ -x "zsh-5.9/install/bin/zsh" ]] && compgen -G "zsh-5.9/install/lib/zsh/*/zsh/zle.so" > /dev/null; then
-    echo "✅ Sish は既にセットアップ済みだよ！"
+    echo "✅ Sish is already set up!"
     echo ""
-    echo "起動方法："
+    echo "How to start:"
     echo "  ./sish"
     echo ""
     exit 0
 fi
 
-echo "📦 zsh をビルド中..."
+echo "📦 Building zsh..."
 cd zsh-5.9
 
-# configure が無い場合は生成する（zsh の標準手順）
+# If configure is missing, generate it (zsh standard procedure)
 if [[ ! -x "./configure" ]]; then
-    echo "⚙️  configure を生成中..."
+    echo "⚙️  Generating configure..."
     if [[ -x "./Util/preconfig" ]]; then
         ./Util/preconfig || {
-            echo "❌ configure の生成に失敗したよ..."
-            echo "ヒント: autoconf/autoheader が必要だよ（例: Ubuntuなら 'sudo apt install autoconf'）"
+            echo "❌ Failed to generate configure."
+            echo "Hint: autoconf/autoheader required (e.g. sudo apt install autoconf)"
             exit 1
         }
     else
         # Fallback: autoreconf -i
         if command -v autoreconf >/dev/null 2>&1; then
             autoreconf -i || {
-                echo "❌ autoreconf に失敗したよ..." >&2
+                echo "❌ autoreconf failed." >&2
                 exit 1
             }
         else
-        echo "❌ Util/preconfig が見つからないよ..."
-        exit 1
+            echo "❌ Util/preconfig not found and autoreconf not available."
+            exit 1
         fi
     fi
 fi
 
-# configure がまだ実行されていない、または PREFIX が間違っている場合
+# If configure hasn't been run or prefix is wrong, run it
 if [[ ! -f "Makefile" ]] || ! grep -q "^prefix.*=.*$PWD/install" Makefile 2>/dev/null; then
-    echo "⚙️  configure を実行中..."
+    echo "⚙️  Running configure..."
     ./configure --prefix="$PWD/install"
 fi
 
@@ -78,30 +90,29 @@ if [[ -z "$JOBS" ]]; then
     fi
 fi
 
-echo "🔨 make でビルド中... (少し時間がかかるよ)"
+echo "🔨 Building with make... (this may take a while)"
 make -j"$JOBS" || {
-    echo "❌ ビルドに失敗したよ..."
+    echo "❌ Build failed."
     exit 1
 }
 
-echo "📥 ローカルにインストール中..."
-# 'make install' は man/runhelp の生成環境によって失敗しやすいので、必要なものだけ入れる
+echo "📥 Installing locally..."
+# 'make install' for only required parts (man/runhelp often fails in minimal envs)
 make install.bin install.modules install.fns || {
-    echo "❌ ローカルインストールに失敗したよ..."
-    echo "ヒント: もう少し詳しいログを見るには次を実行してね:"
-    echo "  (cd zsh-5.9 && make install.bin install.modules install.fns)"
+    echo "❌ Local install failed."
+    echo "Hint: For more details, run: (cd zsh-5.9 && make install.bin install.modules install.fns)"
     exit 1
 }
 
 cd ..
 
 echo ""
-echo "✅ セットアップ完了！"
+echo "✅ Setup complete!"
 echo ""
-echo "起動方法："
+echo "How to start:"
 echo "  ./sish"
 echo ""
-echo "設定メニュー："
+echo "Settings menu:"
 echo "  ./sish"
 echo "  Sish> sish-config"
 echo ""

@@ -22,7 +22,7 @@ cd Sish
 # Method 1: Startup script
 ./sish
 
-# Method 2: GUI with wallpaper and auto Sish launch
+# Method 2: GUI(sish-console app) with wallpaper and auto Sish launch
 cd Sish-Console
 cargo run
 ```
@@ -97,11 +97,11 @@ $ sish-config
    1. Theme Color
    2. Tone / Personality
    3. Character (includes Language)
-   4. Shortcuts
-   5. Completion
-   6. LLM Integration
+   4. Shortcuts (Not implemented)
+   5. Completion (Not implemented)
+   6. LLM Integration (Not implemented)
    7. Error Verbosity
-   8. GUI Integration
+   8. GUI Integration (Not implemented - Requires Sish-Console)
    9. Reset Settings
  ▶ 0. Save & Exit 
 
@@ -311,7 +311,21 @@ Sish：💡 ゼロで割ろうとしてるよ！
 
 ```bash
 $ sish-config
-# → インタラクティブ設定画面が開く
+╔═══════════════════════════════════════════════════════════════╗
+║        Sish 設定メニュー - お兄ちゃんの好みに合わせるよ！    ║
+╚═══════════════════════════════════════════════════════════════╝
+
+   1. テーマカラー設定
+   2. 口調・パーソナリティ設定
+   3. キャラクター設定（言語を含む）
+   4. ショートカット管理 (未実装)
+   5. 補完機能設定 (未実装)
+   6. LLM統合設定 (未実装)
+   7. エラーメッセージ詳細度
+   8. GUI連携設定 (未実装・Sish-Console必須)
+   9. 設定をリセット
+ ▶ 0. 設定を保存して終了
+
 ```
 ### 完全なzsh互換
 

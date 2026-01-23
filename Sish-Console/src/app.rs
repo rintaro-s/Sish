@@ -643,7 +643,17 @@ fn open_preferences_dialog(window: &ApplicationWindow, notebook: &Notebook, wall
     content.set_margin_start(24);
     content.set_margin_end(24);
 
-    // Wallpaper
+    // Note: Sish-Console specific settings (not available in sish-config)
+    let note_label = Label::new(Some(tr(
+        "※以下の設定はSish-Console固有です（sish-configでは変更不可）",
+        "※Note: Settings below are Sish-Console specific (not available in sish-config)"
+    )));
+    note_label.add_css_class("dim-label");
+    note_label.set_xalign(0.0);
+    note_label.set_wrap(true);
+    content.append(&note_label);
+
+    // Wallpaper (Sish-Console only)
     let wallpaper_row = GtkBox::new(Orientation::Horizontal, 8);
     let wallpaper_label = Label::new(Some(tr("壁紙パス", "Wallpaper Path")));
     wallpaper_label.set_xalign(0.0);

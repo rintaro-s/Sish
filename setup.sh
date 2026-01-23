@@ -1,118 +1,148 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
-echo "🌸 Sish セットアップ開始..."
-echo ""
+# ===============================
+# Sish Setup & Build Script
+# ===============================
+set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# ---- Preflight: check required tools (no sudo / no system install) ----
+PROJECT_ROOT="$SCRIPT_DIR"
+ZSH_DIR="$PROJECT_ROOT/zsh-5.9"
+
+step() {
+  echo -e "\033[1;36m==> $1\033[0m"
+}
+substep() {
+  echo -e "  \033[1;34m- $1\033[0m"
+}
+success() {
+  echo -e "\033[1;32m✔ $1\033[0m"
+}
+fail() {
+  echo -e "\033[1;31m✖ $1\033[0m" >&2
+}
+info() {
+  echo -e "\033[1;33m$1\033[0m"
+}
+
+# ---- Project Overview ----
+step "Sish Project Structure Overview"
+cat <<EOF
+  - zsh-5.9/         : Sish core (Zsh-based, C)
+  - Sish-Console/    : GUI (Rust/GTK4)
+  - config/          : Config files, i18n
+  - scripts, *.sh    : Build/convert/test scripts
+  - Test/            : Test data
+  - docs/            : Documentation
+  - translate.py     : Translation/i18n helper
+EOF
+echo
+
+step "Environment check (build tools, libraries)"
 missing=()
-# Accept any of these C/C++ compilers
-compilers=(gcc clang cc c99 c89 tcc icc icx zig clang-cl cl xlc pgcc c++)
+compilers=(gcc clang cc c99 c89)
 found_compiler=""
 for c in "${compilers[@]}"; do
     if command -v "$c" >/dev/null 2>&1; then
         found_compiler="$c"
+        substep "C compiler: $c"
         break
     fi
 done
 if [[ -z "$found_compiler" ]]; then
-    missing+=("C compiler (gcc/clang/cc/c99/c89/tcc/icc/icx/zig/clang-cl/cl/xlc/pgcc/c++)")
+    fail "No C compiler found (gcc/clang/cc etc)"
+    exit 2
 fi
+
 for cmd in make autoconf autoheader pkg-config; do
-    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        missing+=("$cmd")
+    else
+        substep "$cmd: OK"
+    fi
 done
 
 if (( ${#missing[@]} > 0 )); then
-    echo "❌ Missing required build tools: ${missing[*]}" >&2
-    echo "Hint: On Debian/Ubuntu, try: sudo apt-get update && sudo apt-get install -y build-essential autoconf pkg-config libncurses-dev" >&2
-    exit 1
+    fail "Missing required build tools: ${missing[*]}"
+    info "\n  Example: sudo apt install build-essential autoconf pkg-config"
+    exit 3
 fi
 
-# ncursesw (wide-char) is required for zle, check for it
-if ! pkg-config --exists ncursesw && ! pkg-config --exists ncurses; then
-    echo "❌ ncursesw (libncursesw5-dev or libncurses-dev) not found" >&2
-    echo "Hint: On Debian/Ubuntu, try: sudo apt-get install -y libncursesw5-dev or libncurses-dev" >&2
-    exit 1
+# Always ignore TERM, stdin, and TTY for build/install logic
+export TERM=dumb
+export NCURSES_NO_UTF8_ACS=1
+export DEBIAN_FRONTEND=noninteractive
+export LC_ALL=C
+export LANG=C
+export LANGUAGE=C
+
+# Check for ncurses presence, but do not fail if only terminfo is missing
+if pkg-config --exists ncursesw; then
+    substep "ncursesw: OK"
+elif pkg-config --exists ncurses; then
+    substep "ncurses: OK"
+else
+    fail "ncurses library not found (libncursesw-dev etc)"
+    info "\n  Example: sudo apt install libncursesw5-dev"
+    exit 4
 fi
 
-# ---- Detect already-installed local zsh ----
-# Check if zsh-5.9 is already built and installed locally
-if [[ -x "zsh-5.9/install/bin/zsh" ]] && compgen -G "zsh-5.9/install/lib/zsh/*/zsh/zle.so" > /dev/null; then
-    echo "✅ Sish is already set up!"
-    echo ""
-    echo "How to start:"
-    echo "  ./sish"
-    echo ""
-    exit 0
-fi
+success "Environment check complete"
+echo
 
-echo "📦 Building zsh..."
-cd zsh-5.9
+# ---- Build zsh (Sish core) ----
+step "Entering zsh-5.9 directory"
+cd "$ZSH_DIR"
 
-# If configure is missing, generate it (zsh standard procedure)
+step "Pre-build: ensure configure script exists"
 if [[ ! -x "./configure" ]]; then
-    echo "⚙️  Generating configure..."
-    if [[ -x "./Util/preconfig" ]]; then
-        ./Util/preconfig || {
-            echo "❌ Failed to generate configure."
-            echo "Hint: autoconf/autoheader required (e.g. sudo apt install autoconf)"
-            exit 1
-        }
-    else
-        # Fallback: autoreconf -i
-        if command -v autoreconf >/dev/null 2>&1; then
-            autoreconf -i || {
-                echo "❌ autoreconf failed." >&2
-                exit 1
-            }
-        else
-            echo "❌ Util/preconfig not found and autoreconf not available."
-            exit 1
-        fi
+    substep "Running ./Util/preconfig"
+    if ! ./Util/preconfig </dev/null; then
+        fail "preconfig failed: ./Util/preconfig"
+        exit 10
     fi
+else
+    substep "configure: already exists"
 fi
 
-# If configure hasn't been run or prefix is wrong, run it
-if [[ ! -f "Makefile" ]] || ! grep -q "^prefix.*=.*$PWD/install" Makefile 2>/dev/null; then
-    echo "⚙️  Running configure..."
-    ./configure --prefix="$PWD/install"
-fi
-
-JOBS="${JOBS:-}"
-if [[ -z "$JOBS" ]]; then
-    if command -v nproc >/dev/null 2>&1; then
-        JOBS=$(nproc)
-    else
-        JOBS=1
+step "Running configure"
+if [[ ! -f "Makefile" ]]; then
+    if ! ./configure --prefix="$PWD/install" </dev/null; then
+        fail "configure failed: ./configure"
+        info "\n  See config.log for details: $ZSH_DIR/config.log"
+        exit 11
     fi
+else
+    substep "Makefile: already exists"
 fi
 
-echo "🔨 Building with make... (this may take a while)"
-make -j"$JOBS" || {
-    echo "❌ Build failed."
-    exit 1
-}
+# Always use single-threaded make for maximum portability
+step "Running make (single-threaded for reproducibility)"
+if ! make -j1; then
+    fail "make failed: build error"
+    info "\n  See error output above."
+    exit 12
+fi
 
-echo "📥 Installing locally..."
-# 'make install' for only required parts (man/runhelp often fails in minimal envs)
-make install.bin install.modules install.fns || {
-    echo "❌ Local install failed."
-    echo "Hint: For more details, run: (cd zsh-5.9 && make install.bin install.modules install.fns)"
-    exit 1
-}
+step "make install (bin/modules/functions)"
+if ! make install.bin install.modules install.fns; then
+    fail "make install failed"
+    exit 13
+fi
 
-cd ..
+cd "$PROJECT_ROOT"
+success "Build complete: ./zsh-5.9/install/bin/zsh (Sish core)"
 
-echo ""
-echo "✅ Setup complete!"
-echo ""
-echo "How to start:"
-echo "  ./sish"
-echo ""
-echo "Settings menu:"
-echo "  ./sish"
-echo "  Sish> sish-config"
-echo ""
+step "Next steps (manual)"
+cat <<EONEXT
+  - ./sish         : Launch Sish core (TUI)
+  - ./sish-config  : Settings menu (TUI)
+  - Sish-Console/  : GUI (Rust/GTK4, build separately)
+  - test_sish.sh   : Test script
+  - translate.py   : Translation/i18n helper
+  - docs/          : Documentation
+EONEXT
+
+exit 0

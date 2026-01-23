@@ -603,6 +603,22 @@
                 <div class="pt-2">
                     <code class="text-xl md:text-2xl text-emerald-400 font-mono">git clone https://github.com/rintaro-s/Sish.git &amp;&amp; cd Sish &amp;&amp; ./setup.sh &amp;&amp; SISH_LANG=en ./sish</code>
                 </div>
+
+                <div class="mt-6 text-left text-xs text-slate-400">
+    <b>If you only want to use it temporarily on a docker:：</b><br>
+    <code class="block bg-slate-900 p-3 rounded-lg mt-2 whitespace-pre text-[13px] text-emerald-300">docker run -it --rm ubuntu:24.04 /bin/bash -c "
+  apt-get update && \\
+  apt-get install -y git && \\
+  apt-get install -y build-essential autoconf pkg-config libncursesw5-dev zsh curl && \\
+  git clone https://github.com/rintaro-s/Sish.git && \\
+  cd Sish && \\
+  chmod +x setup.sh; \\
+  ./setup.sh; \\
+  SISH_LANG=en ./sish; \\
+  echo '--- Execution finished. Opening shell for debugging ---'; \\
+  bash
+"</code>
+</div>
                 
             </div>
             <p class="text-slate-500">

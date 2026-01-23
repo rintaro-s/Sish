@@ -54,11 +54,11 @@ done
 
 if [[ -z "$found_compiler" ]]; then
     fail "No C compiler found (gcc/clang/cc etc)"
-    info "\nTo install required tools on Ubuntu/Debian, run:"
+    info "To install required tools on Ubuntu/Debian, run:"
     echo "  sudo apt-get update && sudo apt-get install -y build-essential autoconf pkg-config libncursesw5-dev"
-    echo "\nIf you also want GUI support:"
+    echo "If you also want GUI support:"
     echo "  sudo apt-get install -y cargo libgtk-4-dev libvte-2.91-gtk4-dev libgraphene-1.0-dev libcairo2-dev libpango1.0-dev"
-    echo "\nFor translation features:"
+    echo "For translation features:"
     echo "  sudo apt-get install -y python3-pip && pip3 install ctranslate2 transformers"
     exit 2
 fi
@@ -118,20 +118,23 @@ fi
 
 
 # --- Always show recommended install commands for all features ---
-info "\nRecommended install commands (Ubuntu/Debian):"
+
+info "Recommended install commands (Ubuntu/Debian):"
 echo "  # For Sish core (TUI only):"
 echo "  sudo apt-get update && sudo apt-get install -y build-essential autoconf pkg-config libncursesw5-dev"
-echo "\n  # For Sish-Console (GUI, Rust/GTK4):"
+echo "  # For Sish-Console (GUI, Rust/GTK4):"
 echo "  sudo apt-get install -y cargo libgtk-4-dev libvte-2.91-gtk4-dev libgraphene-1.0-dev libcairo2-dev libpango1.0-dev"
-echo "\n  # For translation (translate.py):"
+echo "  # For translation (translate.py):"
 echo "  sudo apt-get install -y python3-pip && pip3 install ctranslate2 transformers"
 
 success "Environment check complete"
 echo
 
+
 # ---- Build zsh (Sish core) ----
 step "Entering zsh-5.9 directory"
 cd "$ZSH_DIR"
+success "Entered zsh-5.9 directory"
 
 step "Pre-build: ensure configure script exists"
 if [[ ! -x "./configure" ]]; then
@@ -140,34 +143,64 @@ if [[ ! -x "./configure" ]]; then
         fail "preconfig failed: ./Util/preconfig"
         exit 10
     fi
+    success "preconfig completed"
 else
     substep "configure: already exists"
+    success "configure script already present"
 fi
 
 step "Running configure"
 if [[ ! -f "Makefile" ]]; then
     if ! ./configure --prefix="$PWD/install" </dev/null; then
         fail "configure failed: ./configure"
-        info "\n  See config.log for details: $ZSH_DIR/config.log"
+        info "  See config.log for details: $ZSH_DIR/config.log"
         exit 11
     fi
+    success "configure completed"
 else
     substep "Makefile: already exists"
+    success "Makefile already present"
 fi
 
 # Always use single-threaded make for maximum portability
 step "Running make (single-threaded for reproducibility)"
-if ! make -j1; then
+MAKE_LOG="/tmp/sish_make_$$.log"
+start_time=$(date +%s)
+timeout=300
+(
+    set -o pipefail
+    make -j1 2>&1 | tee "$MAKE_LOG"
+) &
+make_pid=$!
+while kill -0 $make_pid 2>/dev/null; do
+    now=$(date +%s)
+    elapsed=$((now - start_time))
+    if (( elapsed > timeout )); then
+        fail "make timed out after $timeout seconds."
+        echo "--- make log (last 100 lines) ---"
+        tail -n 100 "$MAKE_LOG"
+        kill $make_pid 2>/dev/null || true
+        exit 12
+    fi
+    sleep 2
+done
+wait $make_pid
+make_status=$?
+if (( make_status != 0 )); then
     fail "make failed: build error"
-    info "\n  See error output above."
+    echo "--- make log (last 100 lines) ---"
+    tail -n 100 "$MAKE_LOG"
+    info "  See error output above."
     exit 12
 fi
+success "make completed successfully"
 
 step "make install (bin/modules/functions)"
 if ! make install.bin install.modules install.fns; then
     fail "make install failed"
     exit 13
 fi
+success "make install completed"
 
 cd "$PROJECT_ROOT"
 success "Build complete: ./zsh-5.9/install/bin/zsh (Sish core)"
@@ -177,9 +210,6 @@ cat <<EONEXT
   - ./sish         : Launch Sish core (TUI)
   - ./sish-config  : Settings menu (TUI)
   - Sish-Console/  : GUI (Rust/GTK4, build separately)
-  - test_sish.sh   : Test script
-  - translate.py   : Translation/i18n helper
-  - docs/          : Documentation
 EONEXT
 
 exit 0

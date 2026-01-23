@@ -64,10 +64,28 @@ for cmd in make autoconf autoheader pkg-config; do
     fi
 done
 
+
 if (( ${#missing[@]} > 0 )); then
-    fail "Missing required build tools: ${missing[*]}"
-    info "\n  Example: sudo apt install build-essential autoconf pkg-config"
-    exit 3
+        fail "Missing required build tools: ${missing[*]}"
+        # Suggest apt-get install command for common cases
+        apt_map=(
+            [gcc]=build-essential
+            [clang]=clang
+            [make]=build-essential
+            [autoconf]=autoconf
+            [autoheader]=autoconf
+            [pkg-config]=pkg-config
+        )
+        apt_list=()
+        for m in "${missing[@]}"; do
+            pkg=${apt_map[$m]:-$m}
+            [[ " ${apt_list[*]} " =~ " $pkg " ]] || apt_list+=("$pkg")
+        done
+        if (( ${#apt_list[@]} > 0 )); then
+            info "\n  To install missing tools on Ubuntu/Debian, run:"
+            echo "    sudo apt-get update && sudo apt-get install -y ${apt_list[*]}"
+        fi
+        exit 3
 fi
 
 # Always ignore TERM, stdin, and TTY for build/install logic
@@ -79,13 +97,15 @@ export LANG=C
 export LANGUAGE=C
 
 # Check for ncurses presence, but do not fail if only terminfo is missing
+
 if pkg-config --exists ncursesw; then
     substep "ncursesw: OK"
 elif pkg-config --exists ncurses; then
     substep "ncurses: OK"
 else
     fail "ncurses library not found (libncursesw-dev etc)"
-    info "\n  Example: sudo apt install libncursesw5-dev"
+    info "\n  To install on Ubuntu/Debian, run:"
+    echo "    sudo apt-get update && sudo apt-get install -y libncursesw5-dev"
     exit 4
 fi
 

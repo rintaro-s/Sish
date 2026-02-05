@@ -83,6 +83,8 @@ fi
 
 # 環境変数で指定された値で上書き
 for var in "${(@k)sish_env_overrides}"; do
+    # zshの予約変数（status等）は上書きできないのでスキップ
+    [[ "$var" == "status" ]] && continue
     export "$var=${sish_env_overrides[$var]}"
 done
 
@@ -692,6 +694,8 @@ fi
 cat >> "$DOTDIR/.zshrc" << 'EOFRC_OVERRIDES'
 # Re-apply environment overrides after config loads
 for var in "${(@k)sish_env_overrides}"; do
+    # Skip readonly zsh variables
+    [[ "$var" == "status" ]] && continue
     export "$var=${sish_env_overrides[$var]}"
 done
 EOFRC_OVERRIDES

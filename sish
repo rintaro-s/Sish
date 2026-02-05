@@ -266,18 +266,18 @@ alias llm='sish-llm'
 
 _sish_llm_explain_last() {
     local cmd="$SISH_LAST_CMD"
-    local status="$SISH_LAST_STATUS"
+    local exit_code="$SISH_LAST_STATUS"
     local pwd="$SISH_LAST_PWD"
 
-    if [[ -z "$cmd" || -z "$status" ]]; then
+    if [[ -z "$cmd" || -z "$exit_code" ]]; then
         return 1
     fi
 
     local prompt
     if [[ "${SISH_LANG:-ja}" == "en" ]]; then
-        prompt="Explain why this command failed.\nCommand: $cmd\nExit code: $status\nDirectory: $pwd\nGive a short fix and a next step."
+        prompt="Explain why this command failed.\nCommand: $cmd\nExit code: $exit_code\nDirectory: $pwd\nGive a short fix and a next step."
     else
-        prompt="次のコマンドが失敗した理由を説明して。\nコマンド: $cmd\n終了コード: $status\nディレクトリ: $pwd\n短い修正案と次の一歩も教えて。"
+        prompt="次のコマンドが失敗した理由を説明して。\nコマンド: $cmd\n終了コード: $exit_code\nディレクトリ: $pwd\n短い修正案と次の一歩も教えて。"
     fi
 
     _sish_llm_call "$prompt"
@@ -302,7 +302,7 @@ _sish_llm_maybe_explain_last() {
         fi
     fi
 
-    local status=$?
+    local exit_code=$?
     local cmd="$SISH_LAST_CMD"
 
     if [[ -z "$cmd" ]]; then
@@ -315,12 +315,12 @@ _sish_llm_maybe_explain_last() {
             ;;
     esac
 
-    if (( status == 1 || status == 2 )); then
-        SISH_LAST_STATUS=$status
+    if (( exit_code == 1 || exit_code == 2 )); then
+        SISH_LAST_STATUS=$exit_code
         SISH_LAST_PWD="$PWD"
 
         local fail_file="$HOME/.sish_last_fail"
-        print -r -- "$status|$PWD|$cmd" > "$fail_file"
+        print -r -- "$exit_code|$PWD|$cmd" > "$fail_file"
 
         if [[ "${SISH_LLM_AUTO_EXPLAIN:-0}" -eq 1 ]]; then
             _sish_llm_explain_last

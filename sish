@@ -85,7 +85,7 @@ fi
 for var in "${(@k)sish_env_overrides}"; do
     # zshの予約変数（status等）は上書きできないのでスキップ
     [[ "$var" == "status" ]] && continue
-    export "$var=${sish_env_overrides[$var]}"
+    export "$var=${sish_env_overrides[$var]}" 2>/dev/null || true
 done
 
 setopt AUTO_CD
@@ -107,8 +107,11 @@ else
 fi
 
 # 補完（Tab）
-autoload -Uz compinit
+autoload -Uz compinit 2>/dev/null
 compinit -d ~/.sish_compdump 2>/dev/null || true
+
+# zsh-hook補完（エラーを抑制）
+autoload -Uz add-zsh-hook 2>/dev/null
 
 # ========================================
 # リアルタイム補完（入力中の候補表示）
@@ -167,7 +170,7 @@ _sish_live_completion_update() {
 }
 
 if [[ -o interactive ]]; then
-    zle -N zle-line-pre-redraw _sish_live_completion_update
+    zle -N zle-line-pre-redraw _sish_live_completion_update 2>/dev/null || true
 fi
 
 # ========================================
@@ -330,9 +333,9 @@ _sish_llm_capture_preexec() {
 }
 
 if [[ -o interactive ]]; then
-    autoload -Uz add-zsh-hook
-    add-zsh-hook preexec _sish_llm_capture_preexec
-    add-zsh-hook precmd _sish_llm_maybe_explain_last
+    autoload -Uz add-zsh-hook 2>/dev/null
+    add-zsh-hook preexec _sish_llm_capture_preexec 2>/dev/null || true
+    add-zsh-hook precmd _sish_llm_maybe_explain_last 2>/dev/null || true
 fi
 
 # cd補正フック: ディレクトリが見つからないときに補正候補を表示
@@ -696,7 +699,7 @@ cat >> "$DOTDIR/.zshrc" << 'EOFRC_OVERRIDES'
 for var in "${(@k)sish_env_overrides}"; do
     # Skip readonly zsh variables
     [[ "$var" == "status" ]] && continue
-    export "$var=${sish_env_overrides[$var]}"
+    export "$var=${sish_env_overrides[$var]}" 2>/dev/null || true
 done
 EOFRC_OVERRIDES
 

@@ -2,7 +2,6 @@
 //!
 //! Wraps VTE terminal widget with Sish-specific functionality.
 
-use gtk4::prelude::*;
 use vte4::prelude::*;
 use vte4::Terminal;
 use std::path::PathBuf;
@@ -73,7 +72,7 @@ impl SishTerminal {
         });
         
         // Handle child exit
-        terminal.connect_child_exited(|term, _status| {
+        terminal.connect_child_exited(|_term, _status| {
             log::info!("Shell exited");
             // You could restart the shell or close the window here
         });

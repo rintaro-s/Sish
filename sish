@@ -62,19 +62,16 @@ export SISH_I18N_PATH="SISH_I18N_PATH_PLACEHOLDER"
 typeset -A sish_env_overrides
 for var in SISH_LANG SISH_TONE SISH_THEME SISH_ERROR_VERBOSITY \
            SISH_CHAR_NAME SISH_CHAR_EXPRESSION SISH_CHAR_POSITION SISH_CHAR_SIZE SISH_CHAR_ANIMATION \
+           SISH_SHOW_WELCOME SISH_SHOW_HINT \
+           SISH_LIVE_COMPLETION_ENABLE SISH_LIVE_COMPLETION_MAX_CANDIDATES \
            SISH_COMPLETION_ENABLE SISH_COMPLETION_FUZZY SISH_COMPLETION_MAX_CANDIDATES \
            SISH_COMPLETION_DIR_SIMILARITY SISH_COMPLETION_HISTORY \
-           SISH_LLM_ENABLE SISH_LLM_ENDPOINT SISH_LLM_MODEL SISH_LLM_MAX_TOKENS \
+           SISH_LLM_ENABLE SISH_LLM_ENDPOINT SISH_LLM_MODEL SISH_LLM_MAX_TOKENS SISH_LLM_AUTO_EXPLAIN \
            SISH_GUI_ENABLE SISH_GUI_SOCKET_PATH SISH_GUI_AUTOSTART SISH_GUI_EXPRESSION_SYNC; do
     if [[ -n "${(P)var:-}" ]]; then
         sish_env_overrides[$var]="${(P)var}"
     fi
 done
-
-# Load user's sishrc first to get SISH_TONE and SISH_LANG early
-if [[ -f "$HOME/.sishrc" ]]; then
-    source "$HOME/.sishrc"
-fi
 
 # Load internationalization support
 # First check user's .sish directory, then fall back to the script's config directory
@@ -110,6 +107,231 @@ fi
 # 補完（Tab）
 autoload -Uz compinit
 compinit -d ~/.sish_compdump 2>/dev/null || true
+
+# ========================================
+# リアルタイム補完（入力中の候補表示）
+# ========================================
+_sish_live_completion_update() {
+    [[ "${SISH_LIVE_COMPLETION_ENABLE:-1}" -eq 1 ]] || { zle -M ""; return 0; }
+
+    local buf="$BUFFER"
+    local cur=$CURSOR
+    local left="${buf[1,cur]}"
+    local word="${left##* }"
+
+    if [[ -z "$word" ]]; then
+        zle -M ""
+        return 0
+    fi
+
+    local -a candidates=()
+    if [[ "$word" == */* || "$word" == ~* || "$word" == .* ]]; then
+        local pattern="${word}*"
+        candidates=(${~pattern}(N))
+    else
+        local -a all
+        all=(${(k)commands} ${(k)builtins} ${(k)functions} ${(k)aliases})
+        typeset -aU all
+        local c
+        for c in $all; do
+            [[ "$c" == ${word}* ]] && candidates+="$c"
+        done
+    fi
+
+    if (( ${#candidates} == 0 )); then
+        zle -M ""
+        return 0
+    fi
+
+    local max=${SISH_LIVE_COMPLETION_MAX_CANDIDATES:-5}
+    (( max < 1 )) && max=1
+    (( max > 100 )) && max=100
+
+    local -a show=()
+    local item
+    for item in ${candidates[1,max]}; do
+        if [[ -d "$item" ]]; then
+            show+="$item/"
+        else
+            show+="$item"
+        fi
+    done
+
+    if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+        zle -M "Candidates: ${show[*]}"
+    else
+        zle -M "候補: ${show[*]}"
+    fi
+}
+
+if [[ -o interactive ]]; then
+    zle -N zle-line-pre-redraw _sish_live_completion_update
+fi
+
+# ========================================
+# LLM 統合（簡易フロント）
+# ========================================
+_sish_llm_call() {
+    if [[ -z "$*" ]]; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            echo "Usage: sish-llm <prompt>"
+        else
+            echo "使い方: sish-llm <prompt>"
+        fi
+        return 2
+    fi
+
+    if [[ "${SISH_LLM_ENABLE:-0}" -ne 1 ]]; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            echo "LLM integration is disabled. Enable it in sish-config."
+        else
+            echo "LLM統合が無効です。sish-config で有効にしてください。"
+        fi
+        return 1
+    fi
+
+    if [[ -z "${SISH_LLM_ENDPOINT:-}" ]]; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            echo "SISH_LLM_ENDPOINT is not set."
+        else
+            echo "SISH_LLM_ENDPOINT が設定されていません。"
+        fi
+        return 1
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "curl が必要です。"
+        return 127
+    fi
+
+    local prompt="$*"
+    local model="${SISH_LLM_MODEL:-default}"
+    local max_tokens="${SISH_LLM_MAX_TOKENS:-2000}"
+    local escaped="$prompt"
+    escaped=${escaped//\\/\\\\}
+    escaped=${escaped//"/\\"}
+    escaped=${escaped//$'\n'/\\n}
+
+    local payload
+    payload="{\"model\": \"$model\", \"messages\": [{\"role\": \"user\", \"content\": \"$escaped\"}], \"max_tokens\": $max_tokens}"
+
+    local url
+    if [[ "${SISH_LLM_ENDPOINT}" == */v1* ]]; then
+        url="${SISH_LLM_ENDPOINT}/chat/completions"
+    else
+        url="${SISH_LLM_ENDPOINT}/v1/chat/completions"
+    fi
+
+    local response
+    response=$(curl --fail --silent --show-error \
+        --connect-timeout 5 --max-time 20 \
+        -H 'Content-Type: application/json' \
+        -X POST "$url" \
+        -d "$payload" 2>/dev/null)
+
+    if [[ -z "$response" ]]; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            echo "No response from LLM."
+        else
+            echo "LLMから応答がありません。"
+        fi
+        return 1
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - << 'PY' <<< "$response"
+import json,sys
+try:
+    data=json.load(sys.stdin)
+    msg=data.get('choices',[{}])[0].get('message',{}).get('content','')
+    print(msg.strip())
+except Exception:
+    print(sys.stdin.read())
+PY
+    else
+        echo "$response" | sed -n 's/.*"content":"\(.*\)".*/\1/p' | sed 's/\\n/\n/g'
+    fi
+}
+
+sish-llm() {
+    _sish_llm_call "$@"
+}
+
+alias llm='sish-llm'
+
+_sish_llm_explain_last() {
+    local cmd="$SISH_LAST_CMD"
+    local status="$SISH_LAST_STATUS"
+    local pwd="$SISH_LAST_PWD"
+
+    if [[ -z "$cmd" || -z "$status" ]]; then
+        return 1
+    fi
+
+    local prompt
+    if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+        prompt="Explain why this command failed.\nCommand: $cmd\nExit code: $status\nDirectory: $pwd\nGive a short fix and a next step."
+    else
+        prompt="次のコマンドが失敗した理由を説明して。\nコマンド: $cmd\n終了コード: $status\nディレクトリ: $pwd\n短い修正案と次の一歩も教えて。"
+    fi
+
+    _sish_llm_call "$prompt"
+}
+
+_sish_llm_maybe_explain_last() {
+    if [[ -z "${SISH_LLM_STARTUP_CHECKED:-}" ]]; then
+        SISH_LLM_STARTUP_CHECKED=1
+        if [[ "${SISH_LLM_AUTO_EXPLAIN:-0}" -eq 1 && -f "$HOME/.sish_last_fail" ]]; then
+            line=$(<"$HOME/.sish_last_fail")
+            rm -f "$HOME/.sish_last_fail"
+
+            last_status="${line%%|*}"
+            rest="${line#*|}"
+            last_pwd="${rest%%|*}"
+            last_cmd="${rest#*|}"
+
+            SISH_LAST_STATUS="$last_status"
+            SISH_LAST_PWD="$last_pwd"
+            SISH_LAST_CMD="$last_cmd"
+            _sish_llm_explain_last
+        fi
+    fi
+
+    local status=$?
+    local cmd="$SISH_LAST_CMD"
+
+    if [[ -z "$cmd" ]]; then
+        return 0
+    fi
+
+    case "$cmd" in
+        sish-llm*|llm*|sish-llm-explain* )
+            return 0
+            ;;
+    esac
+
+    if (( status == 1 || status == 2 )); then
+        SISH_LAST_STATUS=$status
+        SISH_LAST_PWD="$PWD"
+
+        local fail_file="$HOME/.sish_last_fail"
+        print -r -- "$status|$PWD|$cmd" > "$fail_file"
+
+        if [[ "${SISH_LLM_AUTO_EXPLAIN:-0}" -eq 1 ]]; then
+            _sish_llm_explain_last
+        fi
+    fi
+}
+
+_sish_llm_capture_preexec() {
+    SISH_LAST_CMD="$1"
+}
+
+if [[ -o interactive ]]; then
+    autoload -Uz add-zsh-hook
+    add-zsh-hook preexec _sish_llm_capture_preexec
+    add-zsh-hook precmd _sish_llm_maybe_explain_last
+fi
 
 # cd補正フック: ディレクトリが見つからないときに補正候補を表示
 cd_with_correction() {
@@ -451,17 +673,6 @@ if [[ -d ~/.sish/commands.d ]]; then
     done
 fi
 
-# 対話モードのみウェルカムメッセージを表示
-if [[ -o interactive ]]; then
-    if [[ "$SISH_LANG" == "en" ]]; then
-        echo "🌸 Sish - Sister Shell"
-        echo "💡 Hint: Type sish-config for settings menu"
-    else
-        echo "🌸 Sish - Sister Shell"
-        echo "💡 ヒント: sish-config で設定メニュー"
-    fi
-    echo ""
-fi
 EOFRC
 
 # Replace the placeholder with actual i18n path
@@ -473,6 +684,17 @@ fi
 if [[ -f "$SISH_CONFIG" ]]; then
     cat "$SISH_CONFIG" >> "$DOTDIR/.zshrc"
 fi
+
+if [[ -f "$HOME/.sishrc" ]]; then
+    cat "$HOME/.sishrc" >> "$DOTDIR/.zshrc"
+fi
+
+cat >> "$DOTDIR/.zshrc" << 'EOFRC_OVERRIDES'
+# Re-apply environment overrides after config loads
+for var in "${(@k)sish_env_overrides}"; do
+    export "$var=${sish_env_overrides[$var]}"
+done
+EOFRC_OVERRIDES
 
 export ZDOTDIR="$DOTDIR"
 

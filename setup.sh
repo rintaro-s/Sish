@@ -56,9 +56,9 @@ if [[ -z "$found_compiler" ]]; then
     fail "No C compiler found (gcc/clang/cc etc)"
     info "To install required tools on Ubuntu/Debian, run:"
     echo "  sudo apt-get update && sudo apt-get install -y build-essential autoconf pkg-config libncursesw5-dev"
-    echo "If you also want GUI support:"
+    echo "If you also want GUI console support (not absolutely necessary.):"
     echo "  sudo apt-get install -y cargo libgtk-4-dev libvte-2.91-gtk4-dev libgraphene-1.0-dev libcairo2-dev libpango1.0-dev"
-    echo "For translation features:"
+    echo "For translation features ():"
     echo "  sudo apt-get install -y python3-pip && pip3 install ctranslate2 transformers"
     exit 2
 fi

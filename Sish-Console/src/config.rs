@@ -17,6 +17,8 @@ pub struct Config {
     pub character: CharacterConfig,
     /// Shortcut settings
     pub shortcuts: ShortcutsConfig,
+    /// Completion settings
+    pub completion: CompletionConfig,
     /// LLM integration settings
     pub llm: LlmConfig,
     /// Theme settings
@@ -58,6 +60,7 @@ pub struct CharacterConfig {
 pub struct ShortcutsConfig {
     pub enabled: bool,
     pub custom_shortcuts: Vec<CustomShortcut>,
+    pub env_var_expansion: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +68,14 @@ pub struct CustomShortcut {
     pub trigger: String,
     pub expansion: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionConfig {
+    pub enabled: bool,
+    pub max_candidates: u32,
+    pub show_directories_first: bool,
+    pub case_sensitive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,23 +127,14 @@ impl Default for Config {
             },
             shortcuts: ShortcutsConfig {
                 enabled: true,
-                custom_shortcuts: vec![
-                    CustomShortcut {
-                        trigger: "g".to_string(),
-                        expansion: "git".to_string(),
-                        description: "Git command".to_string(),
-                    },
-                    CustomShortcut {
-                        trigger: "gs".to_string(),
-                        expansion: "git status".to_string(),
-                        description: "Git status".to_string(),
-                    },
-                    CustomShortcut {
-                        trigger: "a-ins".to_string(),
-                        expansion: "sudo apt install".to_string(),
-                        description: "APT install".to_string(),
-                    },
-                ],
+                env_var_expansion: true,
+                custom_shortcuts: vec![],
+            },
+            completion: CompletionConfig {
+                enabled: true,
+                max_candidates: 5,
+                show_directories_first: true,
+                case_sensitive: false,
             },
             llm: LlmConfig {
                 enabled: false,

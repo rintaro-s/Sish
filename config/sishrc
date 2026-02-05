@@ -7,6 +7,25 @@
 # ja: 日本語 / en: English
 : ${SISH_LANG:=ja}
 
+# ========================================
+# ショートカット管理と環境変数設定
+# ========================================
+# Shortcut Management & Environment Variables
+export SISH_SHORTCUTS_ENABLED=1
+export SISH_COMPLETION_LIMIT=5
+export SISH_SHOW_WELCOME=${SISH_SHOW_WELCOME:-1}
+export SISH_SHOW_HINT=${SISH_SHOW_HINT:-1}
+export SISH_LIVE_COMPLETION_ENABLE=${SISH_LIVE_COMPLETION_ENABLE:-1}
+export SISH_LIVE_COMPLETION_MAX_CANDIDATES=${SISH_LIVE_COMPLETION_MAX_CANDIDATES:-5}
+export SISH_LLM_AUTO_EXPLAIN=${SISH_LLM_AUTO_EXPLAIN:-0}
+
+# Custom environment variables for shortcuts
+export SISH_EDITOR="${EDITOR:-nvim}"
+export SISH_PAGER="${PAGER:-less}"
+export SISH_HOME="${HOME:-~}"
+export SISH_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sish"
+export SISH_HISTORY_FILE="${SISH_HOME}/.sish_history"
+
 # Load internationalization support
 if [[ -f "${${(%):-%x}:A:h}/sish_i18n.zsh" ]]; then
     source "${${(%):-%x}:A:h}/sish_i18n.zsh"
@@ -138,6 +157,10 @@ y() {
 # 追加コマンド
 summon() { command git clone -- "$@"; }
 
+# ショートカットは sish-config で設定してください
+# Configure shortcuts via sish-config command
+
+
 void() {
     if [[ $# -lt 1 ]]; then
         sish_msg "void_usage"
@@ -249,7 +272,13 @@ fi
 # ウェルカムメッセージ（対話モードのみ）
 # ========================================
 if [[ -o interactive ]]; then
-    sish_msg "welcome"
-    sish_msg "hint_config"
-    echo ""
+    if [[ "${SISH_SHOW_WELCOME:-1}" -eq 1 ]]; then
+        sish_msg "welcome"
+    fi
+    if [[ "${SISH_SHOW_HINT:-1}" -eq 1 ]]; then
+        sish_msg "hint_config"
+    fi
+    if [[ "${SISH_SHOW_WELCOME:-1}" -eq 1 || "${SISH_SHOW_HINT:-1}" -eq 1 ]]; then
+        echo ""
+    fi
 fi

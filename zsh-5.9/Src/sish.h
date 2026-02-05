@@ -58,6 +58,11 @@ int sish_completion_dir_similarity(void);
 int sish_completion_history(void);
 int sish_completion_max_candidates(void);
 
+int sish_show_welcome(void);
+int sish_show_hint(void);
+int sish_live_completion_enabled(void);
+int sish_live_completion_max_candidates(void);
+
 int sish_llm_enabled_setting(void);
 const char *sish_llm_endpoint_setting(void);
 const char *sish_llm_model_setting(void);

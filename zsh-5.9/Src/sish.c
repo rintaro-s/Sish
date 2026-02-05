@@ -46,6 +46,11 @@ static int sish_cfg_completion_dir_similarity = 1;
 static int sish_cfg_completion_history = 1;
 static int sish_cfg_completion_max_candidates = 5;
 
+static int sish_cfg_show_welcome = 1;
+static int sish_cfg_show_hint = 1;
+static int sish_cfg_live_completion_enable = 1;
+static int sish_cfg_live_completion_max_candidates = 5;
+
 static int sish_cfg_llm_enable = 0;
 static char sish_cfg_llm_endpoint[256] = "";
 static char sish_cfg_llm_model[128] = "";
@@ -134,6 +139,10 @@ sish_config_init_once(void)
     /* Error verbosity */
     sish_cfg_error_verbosity = sish_env_int("SISH_ERROR_VERBOSITY", 1, 1, 4);
 
+    /* Display */
+    sish_cfg_show_welcome = sish_env_int("SISH_SHOW_WELCOME", 1, 0, 1);
+    sish_cfg_show_hint = sish_env_int("SISH_SHOW_HINT", 1, 0, 1);
+
     /* GUI */
     sish_cfg_gui_enable = sish_env_int("SISH_GUI_ENABLE", 1, 0, 1);
     sish_cfg_gui_autostart = sish_env_int("SISH_GUI_AUTOSTART", 0, 0, 1);
@@ -142,6 +151,8 @@ sish_config_init_once(void)
     if (sock && *sock) sish_copy_bounded(sish_cfg_gui_socket_path, sizeof(sish_cfg_gui_socket_path), sock);
 
     /* Completion */
+    sish_cfg_live_completion_enable = sish_env_int("SISH_LIVE_COMPLETION_ENABLE", 1, 0, 1);
+    sish_cfg_live_completion_max_candidates = sish_env_int("SISH_LIVE_COMPLETION_MAX_CANDIDATES", 5, 1, 100);
     sish_cfg_completion_enable = sish_env_int("SISH_COMPLETION_ENABLE", 1, 0, 1);
     sish_cfg_completion_fuzzy = sish_env_int("SISH_COMPLETION_FUZZY", 1, 0, 1);
     sish_cfg_completion_dir_similarity = sish_env_int("SISH_COMPLETION_DIR_SIMILARITY", 1, 0, 1);
@@ -243,6 +254,38 @@ sish_completion_max_candidates(void)
 {
     sish_config_init_once();
     return sish_cfg_completion_max_candidates;
+}
+
+/**/
+int
+sish_show_welcome(void)
+{
+    sish_config_init_once();
+    return sish_cfg_show_welcome;
+}
+
+/**/
+int
+sish_show_hint(void)
+{
+    sish_config_init_once();
+    return sish_cfg_show_hint;
+}
+
+/**/
+int
+sish_live_completion_enabled(void)
+{
+    sish_config_init_once();
+    return sish_cfg_live_completion_enable;
+}
+
+/**/
+int
+sish_live_completion_max_candidates(void)
+{
+    sish_config_init_once();
+    return sish_cfg_live_completion_max_candidates;
 }
 
 /**/
@@ -918,15 +961,17 @@ sish_print_error(SishErrorType type, const char *cmd, const char *arg)
             }
             fprintf(stderr, "\n");
             
-                /* Show hint */
-                fprintf(stderr, "%s       %s%s\n",
-                    SISH_HINT_COLOR,
-                    sish_lang_is_en() ? "Hint: Please double-check the correct command!" : "ヒント: 正しいコマンドを確認してね！",
-                    SISH_COLOR_RESET);
+                if (sish_show_hint()) {
+                    /* Show hint */
+                    fprintf(stderr, "%s       %s%s\n",
+                        SISH_HINT_COLOR,
+                        sish_lang_is_en() ? "Hint: Please double-check the correct command!" : "ヒント: 正しいコマンドを確認してね！",
+                        SISH_COLOR_RESET);
+                }
             
             sish_free_suggestions(suggestions, suggestion_count);
         }
-    } else if (tmpl->hint && strlen(tmpl->hint) > 0) {
+    } else if (tmpl->hint && strlen(tmpl->hint) > 0 && sish_show_hint()) {
         /* Print generic hint */
         fprintf(stderr, "%s       💡 %s%s\n",
                 SISH_HINT_COLOR, tmpl->hint, SISH_COLOR_RESET);
@@ -1612,10 +1657,12 @@ sish_cd_not_found(const char *dest)
             fprintf(stderr, ", %s%s%s", SISH_SUGGEST_COLOR, best[2], SISH_COLOR_RESET);
         }
         fprintf(stderr, "\n");
-        fprintf(stderr, "%s       %s%s\n",
-            SISH_HINT_COLOR,
-            sish_lang_is_en() ? "Hint: Please check the path!" : "ヒント: パスを確認してね！",
-            SISH_COLOR_RESET);
+        if (sish_show_hint()) {
+            fprintf(stderr, "%s       %s%s\n",
+                SISH_HINT_COLOR,
+                sish_lang_is_en() ? "Hint: Please check the path!" : "ヒント: パスを確認してね！",
+                SISH_COLOR_RESET);
+        }
     } else {
         fprintf(stderr, "%s%s%s\n",
             SISH_HINT_COLOR,

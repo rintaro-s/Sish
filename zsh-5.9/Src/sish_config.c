@@ -37,9 +37,17 @@ static char sish_cfg_char_position[32] = "right-bottom";
 static char sish_cfg_char_size[16] = "medium";
 static int sish_cfg_char_animation = 1;
 
+/* ウェルカムメッセージ・ヒント表示設定 */
+static int sish_cfg_show_welcome = 1;
+static int sish_cfg_show_hint = 1;
+
+/* リアルタイム補完（入力中候補表示） */
+static int sish_cfg_live_completion_enable = 1;
+static int sish_cfg_live_completion_max_candidates = 5;
+
 static int sish_cfg_completion_enable = 1;
 static int sish_cfg_completion_fuzzy = 1;
-static int sish_cfg_completion_max_candidates = 10;
+static int sish_cfg_completion_max_candidates = 5;
 static int sish_cfg_completion_dir_similarity = 1;
 static int sish_cfg_completion_history = 1;
 
@@ -47,6 +55,7 @@ static int sish_cfg_llm_enable = 0;
 static char sish_cfg_llm_endpoint[256] = "";
 static char sish_cfg_llm_model[128] = "";
 static int sish_cfg_llm_max_tokens = 2000;
+static int sish_cfg_llm_auto_explain = 0;
 
 static int
 sish_cfg_llm_ready(void)
@@ -166,26 +175,6 @@ static void shortcuts_init_defaults_if_needed(void) {
     if (sish_cfg_shortcuts_initialized) return;
     sish_cfg_shortcuts_initialized = 1;
     sish_cfg_shortcut_count = 0;
-
-    /* 既存表示に合わせたデフォルト */
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].key, "g", sizeof(sish_cfg_shortcuts[0].key));
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].command, "git", sizeof(sish_cfg_shortcuts[0].command));
-    sish_cfg_shortcut_count++;
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].key, "ga", sizeof(sish_cfg_shortcuts[0].key));
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].command, "git add", sizeof(sish_cfg_shortcuts[0].command));
-    sish_cfg_shortcut_count++;
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].key, "gc", sizeof(sish_cfg_shortcuts[0].key));
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].command, "git commit", sizeof(sish_cfg_shortcuts[0].command));
-    sish_cfg_shortcut_count++;
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].key, "gp", sizeof(sish_cfg_shortcuts[0].key));
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].command, "git push", sizeof(sish_cfg_shortcuts[0].command));
-    sish_cfg_shortcut_count++;
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].key, "d", sizeof(sish_cfg_shortcuts[0].key));
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].command, "docker", sizeof(sish_cfg_shortcuts[0].command));
-    sish_cfg_shortcut_count++;
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].key, "dc", sizeof(sish_cfg_shortcuts[0].key));
-    (void)strncpy(sish_cfg_shortcuts[sish_cfg_shortcut_count].command, "docker-compose", sizeof(sish_cfg_shortcuts[0].command));
-    sish_cfg_shortcut_count++;
 }
 
 static int read_line_canonical(const char *prompt, char *buf, size_t bufsize) {
@@ -404,6 +393,17 @@ static void config_load(void) {
             copy_string_bounded(sish_cfg_char_size, sizeof(sish_cfg_char_size), sval);
         } else if (!strcmp(key, "SISH_CHAR_ANIMATION")) {
             sish_cfg_char_animation = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_SHOW_WELCOME")) {
+            sish_cfg_show_welcome = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_SHOW_HINT")) {
+            sish_cfg_show_hint = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_LIVE_COMPLETION_ENABLE")) {
+            sish_cfg_live_completion_enable = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_LIVE_COMPLETION_MAX_CANDIDATES")) {
+            int v = atoi(sval);
+            if (v < 1) v = 1;
+            if (v > 100) v = 100;
+            sish_cfg_live_completion_max_candidates = v;
         } else if (!strcmp(key, "SISH_COMPLETION_ENABLE")) {
             sish_cfg_completion_enable = atoi(sval) ? 1 : 0;
         } else if (!strcmp(key, "SISH_COMPLETION_FUZZY")) {
@@ -428,6 +428,8 @@ static void config_load(void) {
             if (v < 1) v = 1;
             if (v > 200000) v = 200000;
             sish_cfg_llm_max_tokens = v;
+        } else if (!strcmp(key, "SISH_LLM_AUTO_EXPLAIN")) {
+            sish_cfg_llm_auto_explain = atoi(sval) ? 1 : 0;
         } else if (!strcmp(key, "SISH_GUI_ENABLE")) {
             sish_cfg_gui_enable = atoi(sval) ? 1 : 0;
         } else if (!strcmp(key, "SISH_GUI_SOCKET_PATH")) {
@@ -476,11 +478,11 @@ static void show_main_menu(int selected) {
         "1. テーマカラー設定",
         "2. 口調・パーソナリティ設定",
         "3. キャラクター設定（言語を含む）",
-        "4. ショートカット管理 (未実装)",
-        "5. 補完機能設定 (未実装)",
-        "6. LLM統合設定 (未実装)",
+        "4. ショートカット管理",
+        "5. 補完機能設定",
+        "6. LLM統合設定",
         "7. エラーメッセージ詳細度",
-        "8. GUI連携設定 (未実装・Sish-Console必須)",
+        "8. GUI連携設定・表示設定",
         "9. 設定をリセット",
         "0. 設定を保存して終了",
         NULL
@@ -489,11 +491,11 @@ static void show_main_menu(int selected) {
         "1. Theme Color",
         "2. Tone / Personality",
         "3. Character (includes Language)",
-        "4. Shortcuts (Not implemented)",
-        "5. Completion (Not implemented)",
-        "6. LLM Integration (Not implemented)",
+        "4. Shortcuts",
+        "5. Completion Settings",
+        "6. LLM Integration",
         "7. Error Verbosity",
-        "8. GUI Integration (Not implemented - Requires Sish-Console)",
+        "8. GUI Integration & Display",
         "9. Reset Settings",
         "0. Save & Exit",
         NULL
@@ -916,39 +918,51 @@ static void config_shortcuts(void) {
 static void config_completion(void) {
     for (;;) {
         show_config_header();
-     printf("%s%s%s\n\n", SISH_CMD_COLOR,
-         sish_lang_is_en() ? "Completion" : "補完機能設定",
-         SISH_COLOR_RESET);
+        printf("%s%s%s\n\n", SISH_CMD_COLOR,
+            sish_lang_is_en() ? "Completion Settings" : "補完機能設定",
+            SISH_COLOR_RESET);
 
-     printf("  1. %s: %s%s%s\n", sish_lang_is_en() ? "Enable" : "自動補完", SISH_CHAR_COLOR, sish_cfg_completion_enable ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
-     printf("  2. %s: %s%s%s\n", sish_lang_is_en() ? "Fuzzy match" : "ファジーマッチ", SISH_CHAR_COLOR, sish_cfg_completion_fuzzy ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
-         printf("  3. %s: %s%d%s\n",
-             sish_lang_is_en() ? "Max candidates" : "候補表示数",
-             SISH_CHAR_COLOR, sish_cfg_completion_max_candidates, SISH_COLOR_RESET);
-     printf("  4. %s: %s%s%s\n", sish_lang_is_en() ? "Directory similarity" : "ディレクトリ類似検索", SISH_CHAR_COLOR, sish_cfg_completion_dir_similarity ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
-     printf("  5. %s: %s%s%s\n", sish_lang_is_en() ? "History completion" : "コマンド履歴補完", SISH_CHAR_COLOR, sish_cfg_completion_history ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
+        printf("  1. %s: %s%s%s\n", sish_lang_is_en() ? "Live completion" : "リアルタイム補完", SISH_CHAR_COLOR, sish_cfg_live_completion_enable ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
+        printf("  2. %s: %s%d%s\n",
+            sish_lang_is_en() ? "Live max candidates" : "リアルタイム候補数",
+            SISH_CHAR_COLOR, sish_cfg_live_completion_max_candidates, SISH_COLOR_RESET);
+        printf("  3. %s: %s%s%s\n", sish_lang_is_en() ? "Mistype suggestions" : "ミス時候補表示", SISH_CHAR_COLOR, sish_cfg_completion_enable ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
+        printf("  4. %s: %s%s%s\n", sish_lang_is_en() ? "Fuzzy match" : "ファジーマッチ", SISH_CHAR_COLOR, sish_cfg_completion_fuzzy ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
+        printf("  5. %s: %s%d%s\n",
+            sish_lang_is_en() ? "Mistype max candidates" : "ミス時候補数",
+            SISH_CHAR_COLOR, sish_cfg_completion_max_candidates, SISH_COLOR_RESET);
+        printf("  6. %s: %s%s%s\n", sish_lang_is_en() ? "Directory similarity" : "ディレクトリ類似検索", SISH_CHAR_COLOR, sish_cfg_completion_dir_similarity ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
+        printf("  7. %s: %s%s%s\n", sish_lang_is_en() ? "History completion" : "コマンド履歴補完", SISH_CHAR_COLOR, sish_cfg_completion_history ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
         printf("  0. %s\n", sish_lang_is_en() ? "Back" : "戻る");
 
-     printf("\n%s%s%s", SISH_HINT_COLOR,
-         sish_lang_is_en() ? "Choose (0-5): " : "変更する項目を選択（0-5）: ",
-         SISH_COLOR_RESET);
+        printf("\n%s%s%s", SISH_HINT_COLOR,
+            sish_lang_is_en() ? "Choose (0-7): " : "変更する項目を選択（0-7）: ",
+            SISH_COLOR_RESET);
         fflush(stdout);
 
         int choice = read_key_blocking();
         if (choice < 0) return;
         if (choice == 27 || choice == '0') return;
 
-        if (choice == '1') sish_cfg_completion_enable = !sish_cfg_completion_enable;
-        else if (choice == '2') sish_cfg_completion_fuzzy = !sish_cfg_completion_fuzzy;
-        else if (choice == '3') {
+        if (choice == '1') sish_cfg_live_completion_enable = !sish_cfg_live_completion_enable;
+        else if (choice == '2') {
             int v;
-            if (read_int_canonical(sish_lang_is_en() ? "\nMax candidates (e.g. 10. empty to cancel): " : "\n候補表示数（例: 10。空ならキャンセル）: ", &v)) {
+            if (read_int_canonical(sish_lang_is_en() ? "\nLive max candidates (e.g. 5. empty to cancel): " : "\nリアルタイム候補数（例: 5。空ならキャンセル）: ", &v)) {
+                if (v < 1) v = 1;
+                if (v > 100) v = 100;
+                sish_cfg_live_completion_max_candidates = v;
+            }
+        } else if (choice == '3') sish_cfg_completion_enable = !sish_cfg_completion_enable;
+        else if (choice == '4') sish_cfg_completion_fuzzy = !sish_cfg_completion_fuzzy;
+        else if (choice == '5') {
+            int v;
+            if (read_int_canonical(sish_lang_is_en() ? "\nMistype max candidates (e.g. 5. empty to cancel): " : "\nミス時候補数（例: 5。空ならキャンセル）: ", &v)) {
                 if (v < 1) v = 1;
                 if (v > 200) v = 200;
                 sish_cfg_completion_max_candidates = v;
             }
-        } else if (choice == '4') sish_cfg_completion_dir_similarity = !sish_cfg_completion_dir_similarity;
-        else if (choice == '5') sish_cfg_completion_history = !sish_cfg_completion_history;
+        } else if (choice == '6') sish_cfg_completion_dir_similarity = !sish_cfg_completion_dir_similarity;
+        else if (choice == '7') sish_cfg_completion_history = !sish_cfg_completion_history;
 
         printf("\n%s✅ %s%s\n", SISH_CHAR_COLOR,
                sish_lang_is_en() ? "Updated! (Use 'Save & Exit' to persist)" : "変更したよ！（保存は『設定を保存して終了』）",
@@ -971,10 +985,11 @@ static void config_llm(void) {
          printf("  3. %s: %s%s%s\n", sish_lang_is_en() ? "Model" : "モデル", SISH_CHAR_COLOR,
              sish_cfg_llm_model[0] ? sish_cfg_llm_model : (sish_lang_is_en() ? "(not set)" : "(未設定)"), SISH_COLOR_RESET);
          printf("  4. %s: %s%d%s\n", sish_lang_is_en() ? "Max tokens" : "最大トークン", SISH_CHAR_COLOR, sish_cfg_llm_max_tokens, SISH_COLOR_RESET);
+         printf("  5. %s: %s%s%s\n", sish_lang_is_en() ? "Auto explain last failure" : "直前失敗の自動解説", SISH_CHAR_COLOR, sish_cfg_llm_auto_explain ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
         printf("  0. %s\n", sish_lang_is_en() ? "Back" : "戻る");
 
          printf("\n%s%s%s", SISH_HINT_COLOR,
-             sish_lang_is_en() ? "Choose (0-4): " : "変更する項目を選択（0-4）: ",
+             sish_lang_is_en() ? "Choose (0-5): " : "変更する項目を選択（0-5）: ",
              SISH_COLOR_RESET);
         fflush(stdout);
 
@@ -1003,6 +1018,8 @@ static void config_llm(void) {
                 if (v > 200000) v = 200000;
                 sish_cfg_llm_max_tokens = v;
             }
+        } else if (choice == '5') {
+            sish_cfg_llm_auto_explain = !sish_cfg_llm_auto_explain;
         }
 
         printf("\n%s✅ %s%s\n", SISH_CHAR_COLOR,
@@ -1056,17 +1073,19 @@ static void config_gui(void) {
     for (;;) {
         show_config_header();
          printf("%s%s%s\n\n", SISH_CMD_COLOR,
-             sish_lang_is_en() ? "GUI Integration" : "GUI連携設定",
+             sish_lang_is_en() ? "GUI Integration & Display Settings" : "GUI連携・表示設定",
              SISH_COLOR_RESET);
 
-         printf("  1. %s: %s%s%s\n", sish_lang_is_en() ? "Enable" : "GUI連携", SISH_CHAR_COLOR, sish_cfg_gui_enable ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
+         printf("  1. %s: %s%s%s\n", sish_lang_is_en() ? "Enable GUI" : "GUI連携", SISH_CHAR_COLOR, sish_cfg_gui_enable ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
          printf("  2. %s: %s%s%s\n", sish_lang_is_en() ? "Socket path" : "ソケットパス", SISH_CHAR_COLOR, sish_cfg_gui_socket_path, SISH_COLOR_RESET);
          printf("  3. %s: %s%s%s\n", sish_lang_is_en() ? "Autostart" : "自動起動", SISH_CHAR_COLOR, sish_cfg_gui_autostart ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
          printf("  4. %s: %s%s%s\n", sish_lang_is_en() ? "Expression sync" : "表情同期", SISH_CHAR_COLOR, sish_cfg_gui_expression_sync ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
+         printf("  5. %s: %s%s%s\n", sish_lang_is_en() ? "Show welcome message" : "ウェルカムメッセージ表示", SISH_CHAR_COLOR, sish_cfg_show_welcome ? (sish_lang_is_en() ? "Enabled" : "表示") : (sish_lang_is_en() ? "Disabled" : "非表示"), SISH_COLOR_RESET);
+         printf("  6. %s: %s%s%s\n", sish_lang_is_en() ? "Show hints" : "ヒント表示", SISH_CHAR_COLOR, sish_cfg_show_hint ? (sish_lang_is_en() ? "Enabled" : "表示") : (sish_lang_is_en() ? "Disabled" : "非表示"), SISH_COLOR_RESET);
         printf("  0. %s\n", sish_lang_is_en() ? "Back" : "戻る");
 
          printf("\n%s%s%s", SISH_HINT_COLOR,
-             sish_lang_is_en() ? "Choose (0-4): " : "変更する項目を選択（0-4）: ",
+             sish_lang_is_en() ? "Choose (0-6): " : "変更する項目を選択（0-6）: ",
              SISH_COLOR_RESET);
         fflush(stdout);
 
@@ -1086,6 +1105,10 @@ static void config_gui(void) {
             sish_cfg_gui_autostart = !sish_cfg_gui_autostart;
         } else if (choice == '4') {
             sish_cfg_gui_expression_sync = !sish_cfg_gui_expression_sync;
+        } else if (choice == '5') {
+            sish_cfg_show_welcome = !sish_cfg_show_welcome;
+        } else if (choice == '6') {
+            sish_cfg_show_hint = !sish_cfg_show_hint;
         }
 
         printf("\n%s✅ %s%s\n", SISH_CHAR_COLOR,
@@ -1134,20 +1157,28 @@ static void config_reset(void) {
 
         sish_cfg_completion_enable = 1;
         sish_cfg_completion_fuzzy = 1;
-        sish_cfg_completion_max_candidates = 10;
+        sish_cfg_completion_max_candidates = 5;
         sish_cfg_completion_dir_similarity = 1;
         sish_cfg_completion_history = 1;
+
+        sish_cfg_live_completion_enable = 1;
+        sish_cfg_live_completion_max_candidates = 5;
 
         sish_cfg_llm_enable = 0;
         sish_cfg_llm_endpoint[0] = '\0';
         sish_cfg_llm_model[0] = '\0';
         sish_cfg_llm_max_tokens = 2000;
+        sish_cfg_llm_auto_explain = 0;
 
         sish_cfg_gui_enable = 1;
         strncpy(sish_cfg_gui_socket_path, "/tmp/sish-console.sock", sizeof(sish_cfg_gui_socket_path));
         sish_cfg_gui_socket_path[sizeof(sish_cfg_gui_socket_path) - 1] = '\0';
         sish_cfg_gui_autostart = 0;
         sish_cfg_gui_expression_sync = 1;
+
+        /* Display settings */
+        sish_cfg_show_welcome = 1;
+        sish_cfg_show_hint = 1;
 
         /* ショートカットは初期化フラグを落として再生成 */
         sish_cfg_shortcuts_initialized = 0;
@@ -1189,6 +1220,8 @@ static void config_save(void) {
         write_export_int(fp, "SISH_CHAR_ANIMATION", sish_cfg_char_animation);
 
         fprintf(fp, "\n# Completion\n");
+        write_export_int(fp, "SISH_LIVE_COMPLETION_ENABLE", sish_cfg_live_completion_enable);
+        write_export_int(fp, "SISH_LIVE_COMPLETION_MAX_CANDIDATES", sish_cfg_live_completion_max_candidates);
         write_export_int(fp, "SISH_COMPLETION_ENABLE", sish_cfg_completion_enable);
         write_export_int(fp, "SISH_COMPLETION_FUZZY", sish_cfg_completion_fuzzy);
         write_export_int(fp, "SISH_COMPLETION_MAX_CANDIDATES", sish_cfg_completion_max_candidates);
@@ -1200,12 +1233,17 @@ static void config_save(void) {
         write_export_string(fp, "SISH_LLM_ENDPOINT", sish_cfg_llm_endpoint);
         write_export_string(fp, "SISH_LLM_MODEL", sish_cfg_llm_model);
         write_export_int(fp, "SISH_LLM_MAX_TOKENS", sish_cfg_llm_max_tokens);
+        write_export_int(fp, "SISH_LLM_AUTO_EXPLAIN", sish_cfg_llm_auto_explain);
 
         fprintf(fp, "\n# GUI\n");
         write_export_int(fp, "SISH_GUI_ENABLE", sish_cfg_gui_enable);
         write_export_string(fp, "SISH_GUI_SOCKET_PATH", sish_cfg_gui_socket_path);
         write_export_int(fp, "SISH_GUI_AUTOSTART", sish_cfg_gui_autostart);
         write_export_int(fp, "SISH_GUI_EXPRESSION_SYNC", sish_cfg_gui_expression_sync);
+
+        fprintf(fp, "\n# Display Settings\n");
+        write_export_int(fp, "SISH_SHOW_WELCOME", sish_cfg_show_welcome);
+        write_export_int(fp, "SISH_SHOW_HINT", sish_cfg_show_hint);
 
         fprintf(fp, "\n# Shortcuts (aliases)\n");
         shortcuts_init_defaults_if_needed();

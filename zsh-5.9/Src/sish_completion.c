@@ -454,12 +454,14 @@ sish_smart_completion(const char *cmd, const char *arg, char ***suggestions)
     /* 主要コマンドを検索 */
     for (int i = 0; famous_commands[i].cmd; i++) {
         if (strcmp(cmd, famous_commands[i].cmd) == 0) {
-            if (sish_lang_is_en()) {
-                fprintf(stderr, "%s💡 Completion candidates for %s:%s\n",
-                        SISH_HINT_COLOR, cmd, SISH_COLOR_RESET);
-            } else {
-                fprintf(stderr, "%s💡 %s の補完候補：%s\n",
-                        SISH_HINT_COLOR, cmd, SISH_COLOR_RESET);
+            if (sish_show_hint()) {
+                if (sish_lang_is_en()) {
+                    fprintf(stderr, "%s💡 Completion candidates for %s:%s\n",
+                            SISH_HINT_COLOR, cmd, SISH_COLOR_RESET);
+                } else {
+                    fprintf(stderr, "%s💡 %s の補完候補：%s\n",
+                            SISH_HINT_COLOR, cmd, SISH_COLOR_RESET);
+                }
             }
             return famous_commands[i].completion_func(needle, suggestions);
         }
@@ -499,10 +501,12 @@ sish_show_completions(char **suggestions, int count)
                 SISH_HINT_COLOR, suggestions[i], SISH_COLOR_RESET);
     }
     
-        fprintf(stderr, "%s%s%s\n",
-            SISH_HINT_COLOR,
-            sish_lang_is_en() ? "Press Tab to keep completing!" : "Tabキーでどんどん補完できるよ！",
-            SISH_COLOR_RESET);
+        if (sish_show_hint()) {
+            fprintf(stderr, "%s%s%s\n",
+                SISH_HINT_COLOR,
+                sish_lang_is_en() ? "Press Tab to keep completing!" : "Tabキーでどんどん補完できるよ！",
+                SISH_COLOR_RESET);
+        }
 
     fflush(stderr);
 }

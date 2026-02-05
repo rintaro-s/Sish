@@ -1791,7 +1791,7 @@ zsh_main(UNUSED(int argc), char **argv)
     sish_init();
     
     /* Print Sish welcome message */
-    if (interact && !isset(SHINSTDIN)) {
+    if (interact && !isset(SHINSTDIN) && sish_show_welcome()) {
 		fprintf(stderr, "%s%sSish%s%s%s\n",
 			SISH_CHAR_COLOR,
 			SISH_COLOR_BOLD,

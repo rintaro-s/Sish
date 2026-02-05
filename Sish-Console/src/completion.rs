@@ -3,6 +3,7 @@
 use gtk4::prelude::*;
 use gtk4::{Popover, ListBox, ListBoxRow, Label, ScrolledWindow, gdk};
 use vte4::Terminal;
+use std::fs;
 
 /// Completion popup widget
 pub struct CompletionPopup {
@@ -45,7 +46,7 @@ impl CompletionPopup {
         }
     }
     
-    /// Show completion popup with candidates
+    /// Show completion popup with candidates (limited to top 5)
     pub fn show(&mut self, candidates: Vec<String>, x: f64, y: f64) {
         // Clear existing items
         while let Some(child) = self.listbox.first_child() {
@@ -57,13 +58,21 @@ impl CompletionPopup {
             return;
         }
         
-        self.candidates = candidates;
+        // Limit to top 5 candidates
+        let limited_candidates: Vec<String> = candidates.iter()
+            .take(5)
+            .cloned()
+            .collect();
+        
+        self.candidates = limited_candidates;
         
         // Add candidates to list
-        for candidate in &self.candidates {
+        for (idx, candidate) in self.candidates.iter().enumerate() {
             let row = ListBoxRow::new();
+            // Add numbering for quick reference (1-5)
+            let label_text = format!("{}. {}", idx + 1, candidate);
             let label = Label::builder()
-                .label(candidate)
+                .label(&label_text)
                 .xalign(0.0)
                 .margin_start(8)
                 .margin_end(8)
@@ -127,15 +136,10 @@ impl CompletionPopup {
 
 /// Get completion candidates from shell command
 pub fn get_completions(command: &str) -> Vec<String> {
-    // Try to get completions from shell
-    // For now, return mock data
-    // TODO: Implement actual shell completion via compgen or zsh completion
-    
     if command.is_empty() {
         return Vec::new();
     }
     
-    // Mock completions for common commands
     let parts: Vec<&str> = command.split_whitespace().collect();
     let last_word = parts.last().unwrap_or(&"");
     
@@ -143,18 +147,62 @@ pub fn get_completions(command: &str) -> Vec<String> {
         "ls", "cd", "pwd", "cat", "grep", "find", "echo", "mkdir", "rm", "cp", "mv",
         "touch", "vim", "nano", "less", "head", "tail", "sort", "uniq", "wc",
         "git", "cargo", "python", "node", "npm", "ssh", "scp", "rsync",
+        "history", "help", "man", "apt", "sudo", "make", "chmod", "chown",
     ];
     
     if parts.len() == 1 {
-        // Complete command names
+        // Complete command names (limited to top 5)
         common_commands
             .iter()
             .filter(|cmd| cmd.starts_with(last_word))
             .map(|s| s.to_string())
+            .take(5)
             .collect()
     } else {
         // Complete file paths
-        // TODO: Implement directory completion
-        Vec::new()
+        get_file_completions(last_word)
     }
+}
+
+/// Get file/directory completion candidates
+pub fn get_file_completions(partial_path: &str) -> Vec<String> {
+    let mut completions = Vec::new();
+    
+    // Determine the directory and prefix to match
+    let (dir_path, prefix) = if partial_path.contains('/') {
+        let parts: Vec<&str> = partial_path.rsplitn(2, '/').collect();
+        let prefix = parts.get(0).map(|s| *s).unwrap_or("");
+        let dir = if parts.len() > 1 {
+            parts[1].to_string()
+        } else {
+            ".".to_string()
+        };
+        (dir, prefix.to_string())
+    } else {
+        (".".to_string(), partial_path.to_string())
+    };
+    
+    // List directory contents
+    if let Ok(entries) = fs::read_dir(&dir_path) {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string() {
+                if name.starts_with(&prefix) {
+                    // Add trailing slash for directories
+                    let is_dir = entry.metadata()
+                        .map(|m| m.is_dir())
+                        .unwrap_or(false);
+                    let completion = if is_dir {
+                        format!("{}/", name)
+                    } else {
+                        name
+                    };
+                    completions.push(completion);
+                }
+            }
+        }
+    }
+    
+    // Sort and limit to top 5
+    completions.sort();
+    completions.iter().take(5).cloned().collect()
 }

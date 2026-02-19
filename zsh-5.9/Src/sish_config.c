@@ -68,6 +68,9 @@ static char sish_cfg_gui_socket_path[256] = "/tmp/sish-console.sock";
 static int sish_cfg_gui_autostart = 0;
 static int sish_cfg_gui_expression_sync = 1;
 
+/* Apt2Pacman設定 */
+static int sish_cfg_apt2pacman_enable = 0;
+
 typedef struct {
     char key[32];
     char command[256];
@@ -438,6 +441,8 @@ static void config_load(void) {
             sish_cfg_gui_autostart = atoi(sval) ? 1 : 0;
         } else if (!strcmp(key, "SISH_GUI_EXPRESSION_SYNC")) {
             sish_cfg_gui_expression_sync = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_APT2PACMAN_ENABLE")) {
+            sish_cfg_apt2pacman_enable = atoi(sval) ? 1 : 0;
         }
     }
 
@@ -480,10 +485,11 @@ static void show_main_menu(int selected) {
         "3. キャラクター設定（言語を含む）",
         "4. ショートカット管理",
         "5. 補完機能設定",
-        "6. LLM統合設定",
+        "6. LLM統合設定（未実装）",
         "7. エラーメッセージ詳細度",
-        "8. GUI連携設定・表示設定",
-        "9. 設定をリセット",
+        "8. GUI連携設定・表示設定（未実装）",
+        "9. パッケージマネージャ変換（Apt→Pacman）",
+        "R. 設定をリセット",
         "0. 設定を保存して終了",
         NULL
     };
@@ -493,10 +499,11 @@ static void show_main_menu(int selected) {
         "3. Character (includes Language)",
         "4. Shortcuts",
         "5. Completion Settings",
-        "6. LLM Integration",
+        "6. LLM Integration (Not Implemented)",
         "7. Error Verbosity",
-        "8. GUI Integration & Display",
-        "9. Reset Settings",
+        "8. GUI Integration & Display (Not Implemented)",
+        "9. Package Manager Conversion (Apt→Pacman)",
+        "R. Reset Settings",
         "0. Save & Exit",
         NULL
     };
@@ -1118,6 +1125,47 @@ static void config_gui(void) {
     }
 }
 
+/* Apt2Pacman設定 */
+static void config_apt2pacman(void) {
+    show_config_header();
+    printf("%s%s%s\n\n", SISH_CMD_COLOR,
+           sish_lang_is_en() ? "Package Manager Conversion (Apt→Pacman)" : "パッケージマネージャ変換（Apt→Pacman）",
+           SISH_COLOR_RESET);
+
+    printf("  %s: %s%s%s\n", 
+           sish_lang_is_en() ? "Current" : "現在",
+           SISH_CHAR_COLOR, 
+           sish_cfg_apt2pacman_enable ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), 
+           SISH_COLOR_RESET);
+    printf("\n  %s\n", sish_lang_is_en() 
+           ? "When enabled, apt commands are auto-converted to pacman:"
+           : "有効にすると、aptコマンドが自動的にpacmanに変換されます：");
+    printf("    • apt update          → pacman -Syu\n");
+    printf("    • apt install <pkg>   → pacman -S <pkg>\n");
+    printf("    • apt remove <pkg>    → pacman -R <pkg>\n");
+    printf("    • apt search <pkg>    → pacman -Ss <pkg>\n");
+    
+    printf("\n  %s", sish_lang_is_en() ? "Toggle? (y/N): " : "切り替える？ (y/N): ");
+    fflush(stdout);
+
+    int choice = read_key_blocking();
+    if (choice < 0) return;
+    if (choice == 27) return;
+
+    if (choice == 'y' || choice == 'Y') {
+        sish_cfg_apt2pacman_enable = !sish_cfg_apt2pacman_enable;
+        printf("\n%s✅ %s %s%s\n", SISH_CHAR_COLOR,
+               sish_lang_is_en() ? "Apt2Pacman is now" : "Apt2Pacmanは",
+               sish_cfg_apt2pacman_enable ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"),
+               SISH_COLOR_RESET);
+    } else {
+        printf("\n%s%s%s\n", SISH_HINT_COLOR,
+               sish_lang_is_en() ? "Canceled." : "キャンセルしたよ！",
+               SISH_COLOR_RESET);
+    }
+    sleep(1);
+}
+
 /* 設定をリセット */
 static void config_reset(void) {
     show_config_header();
@@ -1179,6 +1227,9 @@ static void config_reset(void) {
         /* Display settings */
         sish_cfg_show_welcome = 1;
         sish_cfg_show_hint = 1;
+
+        /* Apt2Pacman */
+        sish_cfg_apt2pacman_enable = 0;
 
         /* ショートカットは初期化フラグを落として再生成 */
         sish_cfg_shortcuts_initialized = 0;
@@ -1244,6 +1295,9 @@ static void config_save(void) {
         fprintf(fp, "\n# Display Settings\n");
         write_export_int(fp, "SISH_SHOW_WELCOME", sish_cfg_show_welcome);
         write_export_int(fp, "SISH_SHOW_HINT", sish_cfg_show_hint);
+
+        fprintf(fp, "\n# Package Manager Conversion\n");
+        write_export_int(fp, "SISH_APT2PACMAN_ENABLE", sish_cfg_apt2pacman_enable);
 
         fprintf(fp, "\n# Shortcuts (aliases)\n");
         shortcuts_init_defaults_if_needed();
@@ -1363,7 +1417,7 @@ sish_show_config_menu(void)
                 if (code == 'A' && selected > 0) {
                     selected--;
                     needs_redraw = 1;
-                } else if (code == 'B' && selected < 9) {
+                } else if (code == 'B' && selected < 10) {
                     selected++;
                     needs_redraw = 1;
                 }
@@ -1381,8 +1435,9 @@ sish_show_config_menu(void)
                     case 5: config_llm(); break;
                     case 6: config_error_verbosity(); break;
                     case 7: config_gui(); break;
-                    case 8: config_reset(); break;
-                    case 9:
+                    case 8: config_apt2pacman(); break;
+                    case 9: config_reset(); break;
+                    case 10:
                         config_save();
                         running = 0;
                         break;
@@ -1392,7 +1447,10 @@ sish_show_config_menu(void)
 
             case '1': case '2': case '3': case '4': case '5':
             case '6': case '7': case '8': case '9': case '0':
+            case 'r': case 'R':
                 if (key == '0') {
+                    selected = 10;
+                } else if (key == 'r' || key == 'R') {
                     selected = 9;
                 } else {
                     selected = (key - '1');

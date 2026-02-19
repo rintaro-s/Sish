@@ -67,7 +67,8 @@ for var in SISH_LANG SISH_TONE SISH_THEME SISH_ERROR_VERBOSITY \
            SISH_COMPLETION_ENABLE SISH_COMPLETION_FUZZY SISH_COMPLETION_MAX_CANDIDATES \
            SISH_COMPLETION_DIR_SIMILARITY SISH_COMPLETION_HISTORY \
            SISH_LLM_ENABLE SISH_LLM_ENDPOINT SISH_LLM_MODEL SISH_LLM_MAX_TOKENS SISH_LLM_AUTO_EXPLAIN \
-           SISH_GUI_ENABLE SISH_GUI_SOCKET_PATH SISH_GUI_AUTOSTART SISH_GUI_EXPRESSION_SYNC; do
+           SISH_GUI_ENABLE SISH_GUI_SOCKET_PATH SISH_GUI_AUTOSTART SISH_GUI_EXPRESSION_SYNC \
+           SISH_APT2PACMAN_ENABLE; do
     if [[ -n "${(P)var:-}" ]]; then
         sish_env_overrides[$var]="${(P)var}"
     fi
@@ -440,6 +441,84 @@ cd_with_correction() {
 }
 
 alias cd='cd_with_correction'
+
+# ========================================
+# Apt2Pacman変換機能
+# ========================================
+apt() {
+    # 機能が無効なら通常のaptを実行
+    if [[ "${SISH_APT2PACMAN_ENABLE:-0}" -ne 1 ]]; then
+        command apt "$@"
+        return $?
+    fi
+    
+    if [[ $# -eq 0 ]]; then
+        command apt
+        return $?
+    fi
+    
+    case "$1" in
+        update|upgrade)
+            echo "🔄 Sish: Converting 'apt $1' → 'pacman -Syu'"
+            shift
+            pacman -Syu "$@"
+            ;;
+        install)
+            shift
+            echo "📦 Sish: Converting 'apt install' → 'pacman -S'"
+            pacman -S "$@"
+            ;;
+        remove|uninstall)
+            shift
+            echo "🗑️  Sish: Converting 'apt remove' → 'pacman -R'"
+            pacman -R "$@"
+            ;;
+        search)
+            shift
+            echo "🔍 Sish: Converting 'apt search' → 'pacman -Ss'"
+            pacman -Ss "$@"
+            ;;
+        *)
+            echo "⚠️  Sish: Unknown apt command '$1', running as-is"
+            command apt "$@"
+            ;;
+    esac
+}
+
+sudo() {
+    # apt関連の場合のみ変換をチェック
+    if [[ $# -ge 2 && "$1" == "apt" && "${SISH_APT2PACMAN_ENABLE:-0}" -eq 1 ]]; then
+        shift
+        case "$1" in
+            update|upgrade)
+                echo "🔄 Sish: Converting 'sudo apt $1' → 'sudo pacman -Syu'"
+                shift
+                command sudo pacman -Syu "$@"
+                ;;
+            install)
+                shift
+                echo "📦 Sish: Converting 'sudo apt install' → 'sudo pacman -S'"
+                command sudo pacman -S "$@"
+                ;;
+            remove|uninstall)
+                shift
+                echo "🗑️  Sish: Converting 'sudo apt remove' → 'sudo pacman -R'"
+                command sudo pacman -R "$@"
+                ;;
+            search)
+                shift
+                echo "🔍 Sish: Converting 'sudo apt search' → 'pacman -Ss'"
+                pacman -Ss "$@"
+                ;;
+            *)
+                echo "⚠️  Sish: Unknown apt command '$1', running as-is"
+                command sudo apt "$@"
+                ;;
+        esac
+    else
+        command sudo "$@"
+    fi
+}
 
 # 未定義コマンド提案を即実行
 y() {

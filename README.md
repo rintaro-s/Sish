@@ -186,8 +186,30 @@ C側実装 (`zsh-5.9/Src/sish_config.c`) - メニュー項目8:
 - `SISH_EDITOR`, `SISH_HOME` など: カスタムショートカットで利用可能
 
 ### Requirements
+
+**Minimum requirements for Sish core (TUI only):**
 ```bash
-./zsh-5.9/Src/zsh
+# Ubuntu/Debian
+sudo apt-get update && sudo apt-get install -y \
+  build-essential autoconf pkg-config libncursesw5-dev
+
+# Fedora/RHEL
+sudo dnf install -y gcc make autoconf ncurses-devel
+
+# Arch Linux
+sudo pacman -S base-devel autoconf ncurses
+```
+
+**Known compatibility:**
+- ✅ Ubuntu 20.04, 22.04, 24.04 (ncurses 5.x and 6.x)
+- ✅ Debian 11, 12
+- ✅ Fedora 38+
+- ✅ Arch Linux (latest)
+- ✅ Docker (ubuntu:24.04, debian:12, etc.)
+
+**Build output:**
+```bash
+./zsh-5.9/install/bin/zsh  # Sish core executable
 ```
 
 ---

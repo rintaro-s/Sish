@@ -110,7 +110,22 @@ build_sish() {
     
     # Build
     print_status "Compiling..."
-    make -j$(nproc)
+    if ! make -j$(nproc) 2>&1 | tee /tmp/sish_build.log; then
+        print_error "Build failed!"
+        
+        # Check for common errors
+        if grep -q "conflicting types for 'boolcodes'" /tmp/sish_build.log; then
+            print_warning "Detected ncurses compatibility issue"
+            print_status "This is a known issue with ncurses 6.x on modern systems"
+            print_status "The source code has been patched to handle this"
+            print_status "Please try: rm -rf zsh-5.9 && git checkout zsh-5.9 && ./setup.sh"
+        fi
+        
+        echo ""
+        print_error "Last 50 lines of build log:"
+        tail -n 50 /tmp/sish_build.log
+        exit 1
+    fi
     
     print_success "Sish shell built successfully"
     

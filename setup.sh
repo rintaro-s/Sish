@@ -103,17 +103,28 @@ export LC_ALL=C
 export LANG=C
 export LANGUAGE=C
 
-# Check for ncurses presence, but do not fail if only terminfo is missing
-
+# Check for ncurses presence and version compatibility
+ncurses_ok=false
+ncurses_version=""
 if pkg-config --exists ncursesw; then
-    substep "ncursesw: OK"
+    ncurses_version=$(pkg-config --modversion ncursesw 2>/dev/null || echo "unknown")
+    substep "ncursesw: OK (version $ncurses_version)"
+    ncurses_ok=true
 elif pkg-config --exists ncurses; then
-    substep "ncurses: OK"
+    ncurses_version=$(pkg-config --modversion ncurses 2>/dev/null || echo "unknown")
+    substep "ncurses: OK (version $ncurses_version)"
+    ncurses_ok=true
 else
     fail "ncurses library not found (libncursesw-dev etc)"
     info "\n  To install on Ubuntu/Debian, run:"
     echo "    sudo apt-get update && sudo apt-get install -y libncursesw5-dev"
     exit 4
+fi
+
+# Detect modern ncurses (6.x) which has boolcodes/numcodes/strcodes in term.h
+if [[ "$ncurses_version" =~ ^6\. ]]; then
+    substep "Detected ncurses 6.x - termcap.c compatibility patch applied"
+    # Patch was already applied in termcap.c source
 fi
 
 
@@ -190,7 +201,22 @@ if (( make_status != 0 )); then
     fail "make failed: build error"
     echo "--- make log (last 100 lines) ---"
     tail -n 100 "$MAKE_LOG"
-    info "  See error output above."
+    
+    # Provide helpful error messages for common issues
+    if grep -q "conflicting types for 'boolcodes'" "$MAKE_LOG" 2>/dev/null; then
+        echo ""
+        fail "KNOWN ISSUE: termcap.c conflicts with modern ncurses"
+        info "This should have been auto-patched. If you see this error:"
+        echo "  1. Your termcap.c patch may not have applied correctly"
+        echo "  2. Try: rm -rf zsh-5.9 && git checkout zsh-5.9"
+        echo "  3. Re-run: ./setup.sh"
+    elif grep -q "No such file or directory" "$MAKE_LOG" 2>/dev/null; then
+        echo ""
+        fail "MISSING FILES: Check if all required build tools are installed"
+        echo "  Run: sudo apt-get install -y build-essential autoconf pkg-config libncursesw5-dev"
+    fi
+    
+    info "  See full log: $MAKE_LOG"
     exit 12
 fi
 success "make completed successfully"

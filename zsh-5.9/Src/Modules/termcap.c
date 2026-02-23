@@ -41,7 +41,8 @@
 /**/
 #ifdef HAVE_TGETENT
 
-#ifndef HAVE_BOOLCODES
+/* Modern ncurses (Ubuntu 24.04+) already defines boolcodes in term.h */
+#if !defined(HAVE_BOOLCODES) && !defined(boolcodes)
 static char *boolcodes[] = {
     "bw", "am", "ut", "cc", "xs", "YA", "YF", "YB", "xt", "xn", "eo",
     "gn", "hc", "HC", "km", "YC", "hs", "hl", "in", "YG", "da", "db",
@@ -203,7 +204,7 @@ scantermcap(UNUSED(HashTable ht), ScanFunc func, int flags)
     int num;
     char **capcode, *tcstr, buf[2048], *u;
 
-#ifndef HAVE_NUMCODES
+#if !defined(HAVE_NUMCODES) && !defined(numcodes)
     static char *numcodes[] = {
 	"co", "it", "lh", "lw", "li", "lm", "sg", "ma", "Co", "pa", "MW",
 	"NC", "Nl", "pb", "vt", "ws", "Yo", "Yp", "Ya", "BT", "Yc", "Yb",
@@ -211,7 +212,7 @@ scantermcap(UNUSED(HashTable ht), ScanFunc func, int flags)
 	NULL};
 #endif
 
-#ifndef HAVE_STRCODES
+#if !defined(HAVE_STRCODES) && !defined(strcodes)
     static char *zstrcodes[] = {
 	"ac", "bt", "bl", "cr", "ZA", "ZB", "ZC", "ZD", "cs", "rP", "ct",
 	"MC", "cl", "cb", "ce", "cd", "ch", "CC", "CW", "cm", "do", "ho",

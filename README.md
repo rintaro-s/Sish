@@ -13,6 +13,10 @@
 
 ### Quick Start
 
+/**
+ * This has been tested only on Debian and Ubuntu.
+ */
+
 ```bash
 cd Sish
 
@@ -115,75 +119,6 @@ $ for i in {1..5}; do echo $i; done
 
 ---
 
-### 実装された機能の詳細
-
-#### 1. ショートカット管理機能 ✅
-Rust側 (`Sish-Console/src/shortcuts.rs`):
-- `ShortcutManager` でショートカットの追加・削除・検索を管理
-- `expand_with_env()` メソッドで `$VAR` や `${VAR}` 形式の環境変数展開をサポート
-- `get_env_vars()` で使用中の環境変数一覧を取得
-- **デフォルトショートカットなし**: ユーザーが `sish-config` コマンドで追加可能
-
-C側実装 (`zsh-5.9/Src/sish_config.c`) - メニュー項目4:
-- 登録済みショートカット表示
-- 新しいショートカットの追加 (キーとコマンドを入力)
-- ショートカットの削除 (キー指定で削除)
-- ショートカットの編集 (キー指定で新コマンドに変更)
-- データは `~/.sishrc` に alias形式で保存
-
-設定ファイル (`~/.config/sish/config.toml` / `~/.sishrc`):
-- `[shortcuts]` セクションで カスタムショートカットを定義
-- 環境変数を展開式に含めることが可能 (例: `expansion = "cd $HOME/projects"`)
-- ユーザーが `sish-config` の「ショートカット管理」メニューから追加・編集可能
-
-#### 2. 補完機能の実装 ✅
-Rust側 (`Sish-Console/src/completion.rs`):
-- **上5個制限**: `show()` メソッドで候補を最大5個に制限
-- **ファイル補完**: `get_file_completions()` でファイル/ディレクトリを補完
-- **番号付き表示**: 補完候補に `1. filename` 形式で番号を付与
-- **ディレクトリマーク**: ディレクトリ末尾に `/` を自動付与
-
-C側実装 (`zsh-5.9/Src/sish_config.c`) - メニュー項目5:
-- 自動補完機能の有効/無効切り替え
-- ファジーマッチ機能の有効/無効切り替え
-- 最大候補表示数の設定 (1-200)
-- ディレクトリ類似検索の有効/無効
-- コマンド履歴補完の有効/無効
-- リアルタイム反映 (`Save & Exit` で保存)
-
-#### 3. LLM統合設定 ✅
-C側実装 (`zsh-5.9/Src/sish_config.c`) - メニュー項目6:
-- LLM統合機能の有効/無効切り替え
-- APIエンドポイント設定 (例: `http://localhost:11434`)
-- モデル名設定 (例: `llama3`, `gpt-4`)
-- 最大トークン数設定 (1-200,000)
-- `Save & Exit` で `~/.sishrc` に保存
-
-#### 4. GUI連携・表示設定 ✅
-C側実装 (`zsh-5.9/Src/sish_config.c`) - メニュー項目8:
-- GUI連携の有効/無効切り替え
-- ソケットパス設定 (デフォルト: `/tmp/sish-console.sock`)
-- 自動起動設定の有効/無効
-- 表情同期設定の有効/無効
-- **🆕 ウェルカムメッセージ表示の有効/無効** (「Sishへようこそ！」の表示/非表示)
-- **🆕 ヒント表示の有効/無効** (「💡 ヒント」の表示/非表示)
-- `Save & Exit` で `~/.sishrc` に保存
-
-設定ファイル (`~/.config/sish/config.toml` / `~/.sishrc`):
-- `[completion]` セクション
-  - `max_candidates = 5`: 最大補完候補数
-  - `show_directories_first = true`: ディレクトリを優先表示
-  - `case_sensitive = false`: 大文字小文字を区別しない
-  - `fuzzy = true`: ファジーマッチ有効
-  - `history = true`: 履歴補完有効
-
-#### 5. 環境変数設定 ✅
-`config/sishrc`:
-- `SISH_SHORTCUTS_ENABLED=1`: ショートカット機能の有効化フラグ
-- `SISH_COMPLETION_LIMIT=5`: 補完候補の上限
-- `SISH_SHOW_WELCOME=1`: ウェルカムメッセージ表示フラグ
-- `SISH_SHOW_HINT=1`: ヒント表示フラグ
-- `SISH_EDITOR`, `SISH_HOME` など: カスタムショートカットで利用可能
 
 ### Requirements
 
@@ -309,6 +244,8 @@ git clone https://github.com/rintaro-s/Sish.git ~/.local/share/Sish && cd ~/.loc
 
 
 ## 即座に使う
+
+DebianとUbuntuのみで動作確認をしています
 
 ```bash
 cd Sish

@@ -43,7 +43,7 @@
 
 /* Modern ncurses (Ubuntu 24.04+) already defines boolcodes in term.h */
 #if !defined(HAVE_BOOLCODES) && !defined(boolcodes)
-static const char const *boolcodes[] = {
+static const char * const boolcodes[] = {
     "bw", "am", "ut", "cc", "xs", "YA", "YF", "YB", "xt", "xn", "eo",
     "gn", "hc", "HC", "km", "YC", "hs", "hl", "in", "YG", "da", "db",
     "mi", "ms", "nx", "xb", "NP", "ND", "NR", "os", "5i", "YD", "YE",

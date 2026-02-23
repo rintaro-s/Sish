@@ -108,8 +108,14 @@ else
 fi
 
 # 補完（Tab）
+# Debian環境でのハング対策：compinit を軽量モードで実行
 autoload -Uz compinit 2>/dev/null
-compinit -d ~/.sish_compdump 2>/dev/null || true
+if [[ -f ~/.sish_compdump && $(stat -c %Y ~/.sish_compdump 2>/dev/null || echo 0) -gt $(($(date +%s) - 86400)) ]]; then
+    compinit -C -d ~/.sish_compdump 2>/dev/null || true
+else
+    # 新規または1日以上古い場合のみ更新
+    (timeout 5 compinit -d ~/.sish_compdump >/dev/null 2>&1 &)
+fi
 
 # zsh-hook補完（エラーを抑制）
 autoload -Uz add-zsh-hook 2>/dev/null
@@ -170,7 +176,8 @@ _sish_live_completion_update() {
     fi
 }
 
-if [[ -o interactive ]]; then
+if [[ -o interactive && "${SISH_LIVE_COMPLETION_ENABLE:-1}" -eq 1 ]]; then
+    # Debian環境ではzleイベントが重いため、条件を厳しくする
     zle -N zle-line-pre-redraw _sish_live_completion_update 2>/dev/null || true
 fi
 

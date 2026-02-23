@@ -41,14 +41,13 @@
 /**/
 #ifdef HAVE_TGETENT
 
-/* Modern ncurses (Ubuntu 24.04+) already defines boolcodes in term.h */
-#if !defined(HAVE_BOOLCODES) && !defined(boolcodes)
-static const char * const boolcodes[] = {
-    "bw", "am", "ut", "cc", "xs", "YA", "YF", "YB", "xt", "xn", "eo",
-    "gn", "hc", "HC", "km", "YC", "hs", "hl", "in", "YG", "da", "db",
-    "mi", "ms", "nx", "xb", "NP", "ND", "NR", "os", "5i", "YD", "YE",
-    "es", "hz", "ul", "xo", NULL};
-#endif
+/* Modern ncurses (Ubuntu 24.04+, Debian Testing) already defines
+ * boolcodes, numcodes, and strcodes in term.h as extern variables.
+ * We do NOT define them here; instead, we rely on ncurses providing them.
+ *
+ * For older systems that don't have these in ncurses, they would be
+ * provided by the zsh configure system. If missing, we skip using them.
+ */
 
 /**/
 static int
@@ -64,9 +63,12 @@ ztgetflag(char *s)
     case -1:
 	break;
     case 0:
+/* Only try to use boolcodes if it was provided by ncurses */
+#ifdef boolcodes
 	for (b = (char **)boolcodes; *b; ++b)
 	    if (s[0] == (*b)[0] && s[1] == (*b)[1])
 		return 0;
+#endif
 	break;
     default:
 	return 1;
@@ -204,53 +206,9 @@ scantermcap(UNUSED(HashTable ht), ScanFunc func, int flags)
     int num;
     char **capcode, *tcstr, buf[2048], *u;
 
-#if !defined(HAVE_NUMCODES) && !defined(numcodes)
-    static char *numcodes[] = {
-	"co", "it", "lh", "lw", "li", "lm", "sg", "ma", "Co", "pa", "MW",
-	"NC", "Nl", "pb", "vt", "ws", "Yo", "Yp", "Ya", "BT", "Yc", "Yb",
-	"Yd", "Ye", "Yf", "Yg", "Yh", "Yi", "Yk", "Yj", "Yl", "Ym", "Yn",
-	NULL};
-#endif
+/* numcodes is provided by ncurses if available; we don't define it here */
 
-#if !defined(HAVE_STRCODES) && !defined(strcodes)
-    static char *zstrcodes[] = {
-	"ac", "bt", "bl", "cr", "ZA", "ZB", "ZC", "ZD", "cs", "rP", "ct",
-	"MC", "cl", "cb", "ce", "cd", "ch", "CC", "CW", "cm", "do", "ho",
-	"vi", "le", "CM", "ve", "nd", "ll", "up", "vs", "ZE", "dc", "dl",
-	"DI", "ds", "DK", "hd", "eA", "as", "SA", "mb", "md", "ti", "dm",
-	"mh", "ZF", "ZG", "im", "ZH", "ZI", "ZJ", "ZK", "ZL", "mp", "mr",
-	"mk", "ZM", "so", "ZN", "ZO", "us", "ZP", "SX", "ec", "ae", "RA",
-	"me", "te", "ed", "ZQ", "ei", "ZR", "ZS", "ZT", "ZU", "se", "ZV",
-	"ZW", "ue", "ZX", "RX", "PA", "fh", "vb", "ff", "fs", "WG", "HU",
-	"i1", "is", "i3", "if", "iP", "Ic", "Ip", "ic", "al", "ip", "K1",
-	"K3", "K2", "kb", "@1", "kB", "K4", "K5", "@2", "ka", "kC", "@3",
-	"@4", "@5", "@6", "kt", "kD", "kL", "kd", "kM", "@7", "@8", "kE",
-	"kS", "@9", "k0", "k1", "k;", "F1", "F2", "F3", "F4", "F5", "F6",
-	"F7", "F8", "F9", "k2", "FA", "FB", "FC", "FD", "FE", "FF", "FG",
-	"FH", "FI", "FJ", "k3", "FK", "FL", "FM", "FN", "FO", "FP", "FQ",
-	"FR", "FS", "FT", "k4", "FU", "FV", "FW", "FX", "FY", "FZ", "Fa",
-	"Fb", "Fc", "Fd", "k5", "Fe", "Ff", "Fg", "Fh", "Fi", "Fj", "Fk",
-	"Fl", "Fm", "Fn", "k6", "Fo", "Fp", "Fq", "Fr", "k7", "k8", "k9",
-	"@0", "%1", "kh", "kI", "kA", "kl", "kH", "%2", "%3", "%4", "%5",
-	"kN", "%6", "%7", "kP", "%8", "%9", "%0", "&1", "&2", "&3", "&4",
-	"&5", "kr", "&6", "&9", "&0", "*1", "*2", "*3", "*4", "*5", "*6",
-	"*7", "*8", "*9", "kF", "*0", "#1", "#2", "#3", "#4", "%a", "%b",
-	"%c", "%d", "%e", "%f", "kR", "%g", "%h", "%i", "%j", "!1", "!2",
-	"kT", "!3", "&7", "&8", "ku", "ke", "ks", "l0", "l1", "la", "l2",
-	"l3", "l4", "l5", "l6", "l7", "l8", "l9", "Lf", "LF", "LO", "mo",
-	"mm", "ZY", "ZZ", "Za", "Zb", "Zc", "Zd", "nw", "Ze", "oc", "op",
-	"pc", "DC", "DL", "DO", "Zf", "IC", "SF", "AL", "LE", "Zg", "RI",
-	"Zh", "SR", "UP", "Zi", "pk", "pl", "px", "pn", "ps", "pO", "pf",
-	"po", "PU", "QD", "RC", "rp", "RF", "r1", "r2", "r3", "rf", "rc",
-	"cv", "sc", "sf", "sr", "Zj", "sa", "Sb", "Zk", "Zl", "SC", "sp",
-	"Sf", "ML", "Zm", "MR", "Zn", "st", "Zo", "Zp", "wi", "Zq", "Zr",
-	"Zs", "Zt", "Zu", "Zv", "ta", "Zw", "ts", "TO", "uc", "hu", "u0",
-	"u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9", "WA", "XF",
-	"XN", "Zx", "S8", "Yv", "Zz", "Xy", "Zy", "ci", "Yw", "Yx", "dv",
-	"S1", "Yy", "S2", "S4", "S3", "S5", "Gm", "Km", "Mi", "S6", "xl",
-	"RQ", "S7", "s0", "s1", "s2", "s3", "AB", "AF", "Yz", "ML", "YZ",
-	"MT", "Xh", "Xl", "Xo", "Xr", "Xt", "Xv", "sA", "sL", NULL};
-#endif
+/* strcodes is provided by ncurses if available; we don't define it here */
 
     pm = (Param) hcalloc(sizeof(struct param));
     u = buf;
@@ -258,6 +216,8 @@ scantermcap(UNUSED(HashTable ht), ScanFunc func, int flags)
     pm->node.flags = PM_READONLY | PM_SCALAR;
     pm->gsu.s = &nullsetscalar_gsu;
 
+    /* Only scan boolcodes if ncurses provided them */
+#ifdef boolcodes
     for (capcode = (char **)boolcodes; *capcode; capcode++) {
 	if ((num = ztgetflag(*capcode)) != -1) {
 	    pm->u.str = num ? dupstring("yes") : dupstring("no");
@@ -265,10 +225,13 @@ scantermcap(UNUSED(HashTable ht), ScanFunc func, int flags)
 	    func(&pm->node, flags);
 	}
     }
+#endif
 
     pm->node.flags = PM_READONLY | PM_INTEGER;
     pm->gsu.i = &nullsetinteger_gsu;
 
+    /* Only scan numcodes if ncurses provided them */
+#ifdef numcodes
     for (capcode = (char **)numcodes; *capcode; capcode++) {
 	if ((num = tgetnum(*capcode)) != -1) {
 	    pm->u.val = num;
@@ -276,17 +239,14 @@ scantermcap(UNUSED(HashTable ht), ScanFunc func, int flags)
 	    func(&pm->node, flags);
 	}
     }
+#endif
 
     pm->node.flags = PM_READONLY | PM_SCALAR;
     pm->gsu.s = &nullsetscalar_gsu;
 
-    for (capcode = (char **)
-#ifdef HAVE_STRCODES
-	     strcodes
-#else
-	     zstrcodes
-#endif
-	     ; *capcode; capcode++) {
+    /* Only scan strcodes if ncurses provided them */
+#ifdef strcodes
+    for (capcode = (char **)strcodes; *capcode; capcode++) {
 	if ((tcstr = (char *)tgetstr(*capcode,&u)) != NULL &&
 	    tcstr != (char *)-1) {
 	    pm->u.str = dupstring(tcstr);
@@ -294,6 +254,7 @@ scantermcap(UNUSED(HashTable ht), ScanFunc func, int flags)
 	    func(&pm->node, flags);
 	}
     }
+#endif
 }
 
 static struct paramdef partab[] = {

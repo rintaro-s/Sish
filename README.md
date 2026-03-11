@@ -138,8 +138,6 @@ sudo pacman -S base-devel autoconf ncurses
 **Known compatibility:**
 - ✅ Ubuntu 20.04, 22.04, 24.04 (ncurses 5.x and 6.x)
 - ✅ Debian 11, 12
-- ✅ Fedora 38+
-- ✅ Arch Linux (latest)
 - ✅ Docker (ubuntu:24.04, debian:12, etc.)
 
 **Build output:**

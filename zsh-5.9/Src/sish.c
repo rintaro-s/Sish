@@ -1036,9 +1036,7 @@ sish_gui_connect(void)
 
     if (!sish_console_is_running()) {
         if (sish_gui_autostart()) {
-            /* best-effort: sish-console がPATHにあれば起動 */
-            (void)system("sish-console >/dev/null 2>&1 &");
-            /* すぐにはソケットが出ないかもしれないので、少しだけ待つ */
+            /* nicu は対話型TUIなので、旧GUIの自動起動は無効化する */
             usleep(150 * 1000);
         }
         if (!sish_console_is_running()) return -1;

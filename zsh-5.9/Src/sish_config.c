@@ -63,7 +63,7 @@ sish_cfg_llm_ready(void)
     return sish_cfg_llm_enable && sish_cfg_llm_endpoint[0] != '\0';
 }
 
-static int sish_cfg_gui_enable = 1;
+static int sish_cfg_gui_enable = 0;
 static char sish_cfg_gui_socket_path[256] = "/tmp/sish-console.sock";
 static int sish_cfg_gui_autostart = 0;
 static int sish_cfg_gui_expression_sync = 1;

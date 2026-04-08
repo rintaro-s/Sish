@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export SISH_REPO_ROOT="$SCRIPT_DIR"
 
 DEFAULT_BUILT_SISH_PATH="$SCRIPT_DIR/zsh-5.9/Src/zsh"
 DEFAULT_INSTALLED_SISH_PATH="$SCRIPT_DIR/zsh-5.9/install/bin/zsh"

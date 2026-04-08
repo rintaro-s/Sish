@@ -1,0 +1,481 @@
+use crate::config::Config;
+use crate::shell::ShellSession;
+use anyhow::Context;
+use arboard::Clipboard;
+use crossterm::cursor;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::execute;
+use crossterm::terminal::{
+    self, disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::Terminal;
+use std::fs;
+use std::io::{self, Stdout};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Focus {
+    Terminal,
+    Explorer,
+}
+
+#[derive(Clone)]
+struct ExplorerEntry {
+    name: String,
+    path: PathBuf,
+    is_dir: bool,
+}
+
+struct App {
+    config: Config,
+    shell: ShellSession,
+    rx: Receiver<Vec<u8>>,
+    parser: vt100::Parser,
+    parser_cols: u16,
+    parser_rows: u16,
+    focus: Focus,
+    explorer_path: PathBuf,
+    explorer_entries: Vec<ExplorerEntry>,
+    explorer_selected: usize,
+    show_hidden: bool,
+    status: String,
+    clipboard: Option<Clipboard>,
+}
+
+pub fn run() -> anyhow::Result<()> {
+    let config = Config::load()?;
+    let (cols, rows) = terminal::size().unwrap_or((120, 40));
+    let (shell, rx) = ShellSession::spawn(&config.shell, cols, rows.saturating_sub(3))?;
+
+    enable_raw_mode().context("failed to enable raw mode")?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, cursor::Hide)
+        .context("failed to enter alternate screen")?;
+
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend).context("failed to create terminal")?;
+
+    let result = run_app(&mut terminal, App::new(config, shell, rx, cols, rows));
+
+    disable_raw_mode().ok();
+    let mut stdout = io::stdout();
+    execute!(stdout, LeaveAlternateScreen, cursor::Show).ok();
+
+    result
+}
+
+fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, mut app: App) -> anyhow::Result<()> {
+    loop {
+        app.drain_shell_output();
+        terminal.draw(|frame| app.draw(frame))?;
+
+        if event::poll(Duration::from_millis(16)).context("event poll failed")? {
+            match event::read().context("event read failed")? {
+                Event::Key(key) => {
+                    if app.handle_key(key)? {
+                        break;
+                    }
+                }
+                Event::Resize(cols, rows) => {
+                    app.resize(cols, rows)?;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
+}
+
+impl App {
+    fn new(config: Config, shell: ShellSession, rx: Receiver<Vec<u8>>, cols: u16, rows: u16) -> Self {
+        let explorer_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let parser_rows = rows.saturating_sub(3).max(1);
+        let parser_cols = cols.saturating_sub(36).max(20);
+
+        let mut app = Self {
+            config,
+            shell,
+            rx,
+            parser: vt100::Parser::new(parser_rows, parser_cols, 5000),
+            parser_cols,
+            parser_rows,
+            focus: Focus::Terminal,
+            explorer_path,
+            explorer_entries: Vec::new(),
+            explorer_selected: 0,
+            show_hidden: false,
+            status: "Ctrl+Q:終了 | Ctrl+E/F1: Explorer切替 | Enter: Sishへ送信".to_string(),
+            clipboard: try_init_clipboard(),
+        };
+
+        app.refresh_explorer();
+        app
+    }
+
+    fn draw(&mut self, frame: &mut ratatui::Frame<'_>) {
+        let area = frame.area();
+
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(2), Constraint::Min(4), Constraint::Length(1)])
+            .split(area);
+
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
+            .split(vertical[1]);
+
+        let terminal_cols = body[0].width.saturating_sub(2).max(1);
+        let terminal_rows = body[0].height.saturating_sub(2).max(1);
+        if terminal_cols != self.parser_cols || terminal_rows != self.parser_rows {
+            self.parser_cols = terminal_cols;
+            self.parser_rows = terminal_rows;
+            self.parser.set_size(terminal_rows, terminal_cols);
+            let _ = self.shell.resize(terminal_cols, terminal_rows);
+        }
+
+        let focus_name = match self.focus {
+            Focus::Terminal => "terminal",
+            Focus::Explorer => "explorer",
+        };
+
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                " nicu ",
+                Style::default()
+                    .bg(Color::Cyan)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("embedded shell: {}", self.config.shell),
+                Style::default().fg(Color::Gray),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("focus: {focus_name}"),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]))
+        .block(Block::default().borders(Borders::ALL).title("Nicu Workspace"));
+        frame.render_widget(header, vertical[0]);
+
+        let terminal_border = if self.focus == Focus::Terminal {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let terminal_text = self.parser.screen().contents();
+        let terminal_widget = Paragraph::new(terminal_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Sish Terminal")
+                    .border_style(terminal_border),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(terminal_widget, body[0]);
+
+        let explorer_border = if self.focus == Focus::Explorer {
+            Style::default().fg(Color::LightGreen)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let mut items = Vec::new();
+        items.push(ListItem::new(Line::from(Span::styled(
+            format!("Path: {}", self.explorer_path.display()),
+            Style::default().fg(Color::Gray),
+        ))));
+        items.push(ListItem::new(""));
+
+        for (index, entry) in self.explorer_entries.iter().enumerate() {
+            let marker = if entry.is_dir { "d" } else { "f" };
+            let base_style = if self.focus == Focus::Explorer && self.explorer_selected == index {
+                Style::default().fg(Color::Black).bg(Color::Green)
+            } else if entry.is_dir {
+                Style::default().fg(Color::LightBlue)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            items.push(ListItem::new(Line::from(Span::styled(
+                format!("{marker} {}", entry.name),
+                base_style,
+            ))));
+        }
+
+        if self.explorer_entries.is_empty() {
+            items.push(ListItem::new(Line::from(Span::styled(
+                "(empty)",
+                Style::default().fg(Color::DarkGray),
+            ))));
+        }
+
+        let explorer = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("TUI Explorer")
+                .border_style(explorer_border),
+        );
+        frame.render_widget(explorer, body[1]);
+
+        let footer = Paragraph::new(self.status.clone()).style(Style::default().fg(Color::Gray));
+        frame.render_widget(footer, vertical[2]);
+    }
+
+    fn resize(&mut self, cols: u16, rows: u16) -> anyhow::Result<()> {
+        let pty_rows = rows.saturating_sub(3).max(1);
+        self.shell.resize(cols, pty_rows)
+    }
+
+    fn drain_shell_output(&mut self) {
+        while let Ok(chunk) = self.rx.try_recv() {
+            self.parser.process(&chunk);
+        }
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> anyhow::Result<bool> {
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return Ok(false);
+        }
+
+        if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Ok(true);
+        }
+
+        if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.toggle_focus();
+            return Ok(false);
+        }
+
+        if key.code == KeyCode::F(1) {
+            self.toggle_focus();
+            return Ok(false);
+        }
+
+        if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.copy_terminal_screen();
+            return Ok(false);
+        }
+
+        match self.focus {
+            Focus::Explorer => self.handle_explorer_key(key),
+            Focus::Terminal => self.handle_terminal_key(key),
+        }
+    }
+
+    fn handle_terminal_key(&mut self, key: KeyEvent) -> anyhow::Result<bool> {
+        if let Some(bytes) = key_to_pty_bytes(key) {
+            self.shell.send_bytes(&bytes)?;
+        }
+        Ok(false)
+    }
+
+    fn handle_explorer_key(&mut self, key: KeyEvent) -> anyhow::Result<bool> {
+        match key.code {
+            KeyCode::Up => {
+                if self.explorer_selected > 0 {
+                    self.explorer_selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if self.explorer_selected + 1 < self.explorer_entries.len() {
+                    self.explorer_selected += 1;
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(parent) = self.explorer_path.parent() {
+                    self.explorer_path = parent.to_path_buf();
+                    self.refresh_explorer();
+                    self.status = format!("explorer: {}", self.explorer_path.display());
+                }
+            }
+            KeyCode::Char('r') => {
+                self.refresh_explorer();
+                self.status = "explorer refreshed".to_string();
+            }
+            KeyCode::Char('.') => {
+                self.show_hidden = !self.show_hidden;
+                self.refresh_explorer();
+                self.status = if self.show_hidden {
+                    "show hidden: on".to_string()
+                } else {
+                    "show hidden: off".to_string()
+                };
+            }
+            KeyCode::Enter => {
+                if let Some(entry) = self.explorer_entries.get(self.explorer_selected).cloned() {
+                    if entry.is_dir {
+                        self.explorer_path = entry.path.clone();
+                        self.refresh_explorer();
+                        self.send_cd(&entry.path)?;
+                        self.status = format!("cd {}", entry.path.display());
+                    } else {
+                        self.send_open_file(&entry.path)?;
+                        self.status = format!("open {}", entry.path.display());
+                    }
+                }
+            }
+            _ => {
+                if let Some(bytes) = key_to_pty_bytes(key) {
+                    self.shell.send_bytes(&bytes)?;
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Terminal => Focus::Explorer,
+            Focus::Explorer => Focus::Terminal,
+        };
+        self.status = match self.focus {
+            Focus::Terminal => "focus: terminal".to_string(),
+            Focus::Explorer => "focus: explorer (Enter: open/cd, Backspace: up, .: hidden)".to_string(),
+        };
+    }
+
+    fn refresh_explorer(&mut self) {
+        self.explorer_entries.clear();
+
+        let read_result = fs::read_dir(&self.explorer_path)
+            .or_else(|_| fs::read_dir("."));
+        let Ok(entries) = read_result else {
+            self.status = format!("cannot read {}", self.explorer_path.display());
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if !self.show_hidden && file_name.starts_with('.') {
+                continue;
+            }
+
+            let path = entry.path();
+            let is_dir = path.is_dir();
+            self.explorer_entries.push(ExplorerEntry {
+                name: file_name,
+                path,
+                is_dir,
+            });
+        }
+
+        self.explorer_entries.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+
+        if self.explorer_selected >= self.explorer_entries.len() {
+            self.explorer_selected = self.explorer_entries.len().saturating_sub(1);
+        }
+    }
+
+    fn send_cd(&self, path: &Path) -> anyhow::Result<()> {
+        let quoted = shell_quote(path);
+        self.shell.send(&format!("cd -- {quoted}\r"))
+    }
+
+    fn send_open_file(&self, path: &Path) -> anyhow::Result<()> {
+        let quoted = shell_quote(path);
+        self.shell.send(&format!("less -- {quoted}\r"))
+    }
+
+    fn copy_terminal_screen(&mut self) {
+        let Some(clipboard) = self.clipboard.as_mut() else {
+            self.status = "clipboard unavailable".to_string();
+            return;
+        };
+
+        let text = self.parser.screen().contents();
+        if clipboard.set_text(text).is_ok() {
+            self.status = "copied terminal screen".to_string();
+        } else {
+            self.status = "clipboard copy failed".to_string();
+        }
+    }
+}
+
+fn key_to_pty_bytes(key: KeyEvent) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+
+    match key.code {
+        KeyCode::Enter => out.push(b'\r'),
+        KeyCode::Tab => out.push(b'\t'),
+        KeyCode::Backspace => out.push(0x7f),
+        KeyCode::Esc => out.push(0x1b),
+        KeyCode::Left => out.extend_from_slice(b"\x1b[D"),
+        KeyCode::Right => out.extend_from_slice(b"\x1b[C"),
+        KeyCode::Up => out.extend_from_slice(b"\x1b[A"),
+        KeyCode::Down => out.extend_from_slice(b"\x1b[B"),
+        KeyCode::Home => out.extend_from_slice(b"\x1b[H"),
+        KeyCode::End => out.extend_from_slice(b"\x1b[F"),
+        KeyCode::Delete => out.extend_from_slice(b"\x1b[3~"),
+        KeyCode::PageUp => out.extend_from_slice(b"\x1b[5~"),
+        KeyCode::PageDown => out.extend_from_slice(b"\x1b[6~"),
+        KeyCode::F(n) => {
+            let seq = match n {
+                1 => "\x1bOP",
+                2 => "\x1bOQ",
+                3 => "\x1bOR",
+                4 => "\x1bOS",
+                _ => "",
+            };
+            if seq.is_empty() {
+                return None;
+            }
+            out.extend_from_slice(seq.as_bytes());
+        }
+        KeyCode::Char(c) => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                let lower = c.to_ascii_lowercase();
+                if lower.is_ascii_alphabetic() {
+                    out.push((lower as u8) & 0x1f);
+                } else if lower == ' ' {
+                    out.push(0);
+                } else {
+                    return None;
+                }
+            } else if key.modifiers.contains(KeyModifiers::ALT) {
+                out.push(0x1b);
+                let mut bytes = [0_u8; 4];
+                let text = c.encode_utf8(&mut bytes);
+                out.extend_from_slice(text.as_bytes());
+            } else {
+                let mut bytes = [0_u8; 4];
+                let text = c.encode_utf8(&mut bytes);
+                out.extend_from_slice(text.as_bytes());
+            }
+        }
+        _ => return None,
+    }
+
+    Some(out)
+}
+
+fn shell_quote(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    let escaped = raw.replace('\'', "'\\''");
+    format!("'{escaped}'")
+}
+
+fn try_init_clipboard() -> Option<Clipboard> {
+    let has_graphics = std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var_os("DISPLAY").is_some();
+    if !has_graphics {
+        return None;
+    }
+    Clipboard::new().ok()
+}

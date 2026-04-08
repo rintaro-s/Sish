@@ -31,7 +31,7 @@ info() {
 step "Sish Project Structure Overview"
 cat <<EOF
   - zsh-5.9/         : Sish core (Zsh-based, C)
-  - Sish-Console/    : GUI (Rust/GTK4)
+    - nicu-shell/      : nicu TUI (Rust)
   - config/          : Config files, i18n
   - scripts, *.sh    : Build/convert/test scripts
   - Test/            : Test data
@@ -56,8 +56,8 @@ if [[ -z "$found_compiler" ]]; then
     fail "No C compiler found (gcc/clang/cc etc)"
     info "To install required tools on Ubuntu/Debian, run:"
     echo "  sudo apt-get update && sudo apt-get install -y build-essential autoconf pkg-config libncursesw5-dev"
-    echo "If you also want GUI console support (not absolutely necessary.):"
-    echo "  sudo apt-get install -y cargo libgtk-4-dev libvte-2.91-gtk4-dev libgraphene-1.0-dev libcairo2-dev libpango1.0-dev"
+    echo "If you also want nicu support:"
+    echo "  sudo apt-get install -y cargo"
     echo "For translation features ():"
     echo "  sudo apt-get install -y python3-pip && pip3 install ctranslate2 transformers"
     exit 2
@@ -133,8 +133,8 @@ fi
 info "Recommended install commands (Ubuntu/Debian):"
 echo "  # For Sish core (TUI only):"
 echo "  sudo apt-get update && sudo apt-get install -y build-essential autoconf pkg-config libncursesw5-dev"
-echo "  # For Sish-Console (GUI, Rust/GTK4):"
-echo "  sudo apt-get install -y cargo libgtk-4-dev libvte-2.91-gtk4-dev libgraphene-1.0-dev libcairo2-dev libpango1.0-dev"
+echo "  # For nicu (Rust TUI):"
+echo "  sudo apt-get install -y cargo"
 echo "  # For translation (translate.py):"
 echo "  sudo apt-get install -y python3-pip && pip3 install ctranslate2 transformers"
 
@@ -234,8 +234,8 @@ success "Build complete: ./zsh-5.9/install/bin/zsh (Sish core)"
 step "Next steps (manual)"
 cat <<EONEXT
   - ./sish         : Launch Sish core (TUI)
+    - ./nicu         : Launch nicu TUI
   - ./sish-config  : Settings menu (TUI)
-  - Sish-Console/  : GUI (Rust/GTK4, build separately)
 EONEXT
 
 exit 0

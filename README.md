@@ -7,7 +7,7 @@
 
 > *Most of the project has been translated, but there may still be some mistakes or untranslated parts.*
 
-**Introduction Page：[https://rintaro-s.github.io/Sish/](https://rintaro-s.github.io/Sish/)**  
+**Introduction Page：[https://りん.com/pages/sish.html](https://りん.com/pages/sish.html)**  
 
 ---
 
@@ -26,9 +26,8 @@ cd Sish
 # Method 1: Startup script
 ./sish
 
-# Method 2: GUI(sish-console app) with wallpaper and auto Sish launch
-cd Sish-Console
-cargo run
+# Method 2: nicu TUI shell
+./nicu
 ```
 
 #### Language Configuration
@@ -251,9 +250,8 @@ cd Sish
 # 方法1: 起動スクリプト
 ./sish
 
-# 方法2: 壁紙が使えて、自動でSishを使えるGUI
-cd Sish-Console
-cargo run
+# 方法2: nicu TUIシェル
+./nicu
 ```
 
 ### 言語設定 / Language Configuration
@@ -278,6 +276,7 @@ export SISH_LANG=ja
 - `./sish` を使うと、oh-my-zshなどの既存設定を読み込まず、クリーンな状態で起動します
 - Sish専用の設定は `config/sishrc` に書いてください
 - 既存の `.zshrc` を使いたい場合は、Sish起動後に `source ~/.zshrc` を実行してください
+- `Ctrl+G` で nicu を起動できます
 
 ---
 

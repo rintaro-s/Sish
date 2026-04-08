@@ -1,4 +1,4 @@
-Sish-Console/target/debug/
+nicu-shell/target/debug/
 .venv/
 __pycache__/
 marian-en-jap-ct2/
@@ -11,4 +11,4 @@ zsh-5.9/config.status
 zsh-5.9/config.log
 zsh-5.9/config.h
 zsh-5.9/config.cache
-Sish-Console/target/release/
+nicu-shell/target/release/

@@ -1,14 +1,14 @@
 #!/bin/bash
 #
 # Sish Build Script
-# Builds both the Sish shell (modified zsh) and Sish-Console
+# Builds the Sish shell (modified zsh) and nicu TUI
 #
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZSH_DIR="$SCRIPT_DIR/zsh-5.9"
-CONSOLE_DIR="$SCRIPT_DIR/Sish-Console"
+NICU_DIR="$SCRIPT_DIR/nicu-shell"
 
 # Colors for output
 RED='\033[0;31m'
@@ -54,19 +54,9 @@ check_dependencies() {
         missing_deps+=("autoconf")
     fi
     
-    # Check for Rust (for Sish-Console)
+    # Check for Rust (for nicu)
     if ! command -v cargo &> /dev/null; then
         missing_deps+=("cargo (Rust)")
-    fi
-    
-    # Check for GTK4 development files
-    if ! pkg-config --exists gtk4 2>/dev/null; then
-        missing_deps+=("libgtk-4-dev")
-    fi
-    
-    # Check for VTE4
-    if ! pkg-config --exists vte-2.91-gtk4 2>/dev/null; then
-        print_warning "VTE4 not found, Sish-Console may not build"
     fi
     
     if [ ${#missing_deps[@]} -ne 0 ]; then
@@ -77,7 +67,7 @@ check_dependencies() {
         echo ""
         echo "On Ubuntu/Debian, install with:"
         echo "  sudo apt install build-essential autoconf libncurses-dev texinfo"
-        echo "  sudo apt install libgtk-4-dev libvte-2.91-gtk4-dev"
+        echo "  sudo apt install cargo"
         echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
         exit 1
     fi
@@ -132,17 +122,16 @@ build_sish() {
     cd "$SCRIPT_DIR"
 }
 
-# Build Sish-Console
-build_console() {
-    print_status "Building Sish-Console..."
-    
-    cd "$CONSOLE_DIR"
-    
-    # Build with cargo
+# Build nicu
+build_nicu() {
+    print_status "Building nicu..."
+
+    cd "$NICU_DIR"
+
     cargo build --release
-    
-    print_success "Sish-Console built successfully"
-    
+
+    print_success "nicu built successfully"
+
     cd "$SCRIPT_DIR"
 }
 
@@ -167,28 +156,13 @@ install_sish() {
     cd "$SCRIPT_DIR"
 }
 
-# Install Sish-Console
-install_console() {
-    print_status "Installing Sish-Console..."
-    
-    sudo cp "$CONSOLE_DIR/target/release/sish-console" /usr/local/bin/
-    
-    # Create desktop entry
-    cat > /tmp/sish-console.desktop << EOF
-[Desktop Entry]
-Name=Sish Console
-Comment=A friendly terminal emulator
-Exec=/usr/local/bin/sish-console
-Icon=utilities-terminal
-Terminal=false
-Type=Application
-Categories=System;TerminalEmulator;
-Keywords=terminal;console;shell;sish;
-EOF
-    
-    sudo mv /tmp/sish-console.desktop /usr/share/applications/
-    
-    print_success "Sish-Console installed"
+# Install nicu
+install_nicu() {
+    print_status "Installing nicu..."
+
+    sudo cp "$NICU_DIR/target/release/nicu" /usr/local/bin/
+
+    print_success "nicu installed"
 }
 
 # Main
@@ -209,24 +183,24 @@ main() {
             check_dependencies
             build_sish
             ;;
-        console)
+        nicu)
             check_dependencies
-            build_console
+            build_nicu
             ;;
         install)
             install_sish
-            install_console
+            install_nicu
             ;;
         install-sish)
             install_sish
             ;;
-        install-console)
-            install_console
+        install-nicu)
+            install_nicu
             ;;
         all)
             check_dependencies
             build_sish
-            build_console
+            build_nicu
             print_success "Build complete!"
             echo ""
             echo "To install, run: $0 install"
@@ -234,19 +208,19 @@ main() {
         clean)
             print_status "Cleaning build files..."
             cd "$ZSH_DIR" && make clean || true
-            cd "$CONSOLE_DIR" && cargo clean || true
+            cd "$NICU_DIR" && cargo clean || true
             print_success "Clean complete"
             ;;
         *)
             echo "Usage: $0 [command]"
             echo ""
             echo "Commands:"
-            echo "  all             Build both Sish and Sish-Console (default)"
+            echo "  all             Build both Sish and nicu (default)"
             echo "  sish            Build only Sish shell"
-            echo "  console         Build only Sish-Console"
-            echo "  install         Install both Sish and Sish-Console"
+            echo "  nicu            Build only nicu"
+            echo "  install         Install both Sish and nicu"
             echo "  install-sish    Install only Sish shell"
-            echo "  install-console Install only Sish-Console"
+            echo "  install-nicu    Install only nicu"
             echo "  deps            Check dependencies"
             echo "  clean           Clean build files"
             ;;

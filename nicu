@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+RELEASE_BIN="$SCRIPT_DIR/nicu-shell/target/release/nicu"
+DEBUG_BIN="$SCRIPT_DIR/nicu-shell/target/debug/nicu"
+MANIFEST="$SCRIPT_DIR/nicu-shell/Cargo.toml"
+
+if [[ -n "${NICU_PATH:-}" && -x "$NICU_PATH" ]]; then
+    exec "$NICU_PATH" "$@"
+fi
+
+# 高速起動したい場合のみ事前ビルド済みバイナリを使う
+if [[ "${NICU_USE_BIN:-0}" == "1" ]]; then
+    if [[ -x "$DEBUG_BIN" ]]; then
+        exec "$DEBUG_BIN" "$@"
+    fi
+    if [[ -x "$RELEASE_BIN" ]]; then
+        exec "$RELEASE_BIN" "$@"
+    fi
+fi
+
+exec cargo run --manifest-path "$MANIFEST" -- "$@"

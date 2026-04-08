@@ -27,6 +27,11 @@ export SISH_HOME="${HOME:-~}"
 export SISH_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sish"
 export SISH_HISTORY_FILE="${SISH_HOME}/.sish_history"
 
+# sish ランチャー側から受け取る（未設定時のみ推定）
+if [[ -z "${SISH_REPO_ROOT:-}" ]]; then
+    SISH_REPO_ROOT="${${(%):-%N}:A:h:h}"
+fi
+
 # Load internationalization support
 if [[ -f "${${(%):-%x}:A:h}/sish_i18n.zsh" ]]; then
     source "${${(%):-%x}:A:h}/sish_i18n.zsh"
@@ -232,6 +237,63 @@ oracle() {
     fi
     command chmod +x -- "$@"
 }
+
+
+_sish_resolve_nicu() {
+    local src_root="${SISH_REPO_ROOT:-}"
+    local -a candidates
+    candidates=(
+        "${NICU_PATH:-}"
+        "${SISH_NICU_PATH:-}"
+        "${src_root}/nicu"
+        "${SISH_REPO_ROOT}/nicu"
+        "$HOME/ドキュメント/github/Sish/nicu"
+        "$HOME/Documents/github/Sish/nicu"
+    )
+
+    local c
+    for c in "${candidates[@]}"; do
+        if [[ -n "$c" && -x "$c" ]]; then
+            REPLY="$c"
+            return 0
+        fi
+    done
+
+    local path_nicu
+    path_nicu="$(whence -p nicu 2>/dev/null)"
+    if [[ -n "$path_nicu" ]]; then
+        REPLY="$path_nicu"
+        return 0
+    fi
+
+    return 1
+}
+
+sish_nicu() {
+    local nicu_bin
+    _sish_resolve_nicu || {
+        sish_msg "nicu_not_found" 2>/dev/null || print -r -- "nicu が見つからないよ"
+        return 127
+    }
+    nicu_bin="$REPLY"
+    command "$nicu_bin" "$@"
+}
+
+# sish 内から `nicu` と打つだけで TUI へ遷移できるようにする
+nicu() {
+    sish_nicu "$@"
+}
+
+if [[ -o interactive ]]; then
+    sish_nicu_widget() {
+        zle -I
+        sish_nicu
+        zle reset-prompt
+    }
+    zle -N sish_nicu_widget
+    bindkey -M emacs '^G' sish_nicu_widget
+    bindkey -M viins '^G' sish_nicu_widget
+fi
 
 # ディレクトリ作成と移動
 mkcd() {

@@ -35,10 +35,10 @@ export SISH_MAX_SUGGESTIONS=5
 export SISH_MAX_DISTANCE=3
 
 # ========================================
-# GUI Communication
+# nicu Launcher
 # ========================================
-# Socket path for Sish-Console communication
-export SISH_SOCKET_PATH="/tmp/sish-console.sock"
+# Ctrl+G で起動する nicu を見つけやすくするための補助設定
+# export NICU_PATH="/path/to/nicu"
 
 # ========================================
 # Custom Shortcuts

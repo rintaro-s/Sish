@@ -1,7 +1,7 @@
 use anyhow::Context;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
 
 pub struct ShellSession {
@@ -102,6 +102,14 @@ fn read_loop<R: Read + Send + 'static>(mut reader: R, tx: mpsc::Sender<Vec<u8>>)
 }
 
 fn resolve_shell_tokens(shell: &str) -> Vec<String> {
+    if std::env::var("SISH_NICU_FORCE_SISH")
+        .ok()
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        return detect_sish_or_fallback();
+    }
+
     let shell = shell.trim();
     if shell.is_empty() {
         return detect_sish_or_fallback();
@@ -122,8 +130,9 @@ fn resolve_shell_tokens(shell: &str) -> Vec<String> {
 
 fn detect_sish_or_fallback() -> Vec<String> {
     if let Some(path) = std::env::var_os("SISH_NICU_SHELL") {
-        let as_string = path.to_string_lossy().to_string();
-        if !as_string.trim().is_empty() {
+        let as_path = PathBuf::from(path);
+        if is_executable(&as_path) {
+            let as_string = as_path.to_string_lossy().to_string();
             return vec![as_string];
         }
     }
@@ -141,14 +150,26 @@ fn detect_sish_or_fallback() -> Vec<String> {
 
 fn detect_repo_sish() -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
-    let candidates = [
+    let mut candidates = vec![
         cwd.join("sish"),
         cwd.join("..").join("sish"),
         cwd.join("..").join("..").join("sish"),
     ];
 
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("sish"));
+            candidates.push(parent.join("..").join("sish"));
+            candidates.push(parent.join("..").join("..").join("sish"));
+        }
+    }
+
+    // 開発ワークスペース実行時に確実に拾えるようにする。
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    candidates.push(manifest_dir.join("..").join("sish"));
+
     for candidate in candidates {
-        if candidate.is_file() {
+        if is_executable(&candidate) {
             return Some(candidate.to_string_lossy().to_string());
         }
     }
@@ -161,9 +182,13 @@ fn find_in_path(command: &str) -> Option<String> {
     for directory in std::env::split_paths(&paths) {
         let mut candidate = PathBuf::from(directory);
         candidate.push(command);
-        if candidate.is_file() {
+        if is_executable(&candidate) {
             return Some(candidate.to_string_lossy().to_string());
         }
     }
     None
+}
+
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
 }

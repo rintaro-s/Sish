@@ -20,6 +20,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
+const NICU_PASSTHROUGH_ON: &[u8] = b"\x1b]9;nicu-passthrough=on\x07";
+const NICU_PASSTHROUGH_OFF: &[u8] = b"\x1b]9;nicu-passthrough=off\x07";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Focus {
     Terminal,
@@ -31,6 +34,12 @@ struct ExplorerEntry {
     name: String,
     path: PathBuf,
     is_dir: bool,
+}
+
+struct Wallpaper {
+    lines: Vec<String>,
+    width: usize,
+    height: usize,
 }
 
 struct App {
@@ -45,8 +54,11 @@ struct App {
     explorer_entries: Vec<ExplorerEntry>,
     explorer_selected: usize,
     show_hidden: bool,
+    tui_passthrough: bool,
+    shell_control_tail: Vec<u8>,
     status: String,
     clipboard: Option<Clipboard>,
+    wallpaper: Wallpaper,
 }
 
 pub fn run() -> anyhow::Result<()> {
@@ -112,8 +124,11 @@ impl App {
             explorer_entries: Vec::new(),
             explorer_selected: 0,
             show_hidden: false,
-            status: "Ctrl+Q:終了 | Ctrl+E/F1: Explorer切替 | Enter: Sishへ送信".to_string(),
+            tui_passthrough: false,
+            shell_control_tail: Vec::new(),
+            status: "Ctrl+Q:終了 | Ctrl+E/F1: Explorer切替 | Ctrl+T:TUI直通ON/OFF".to_string(),
             clipboard: try_init_clipboard(),
+            wallpaper: Wallpaper::embedded(),
         };
 
         app.refresh_explorer();
@@ -122,6 +137,13 @@ impl App {
 
     fn draw(&mut self, frame: &mut ratatui::Frame<'_>) {
         let area = frame.area();
+        let panel_bg = Color::Rgb(11, 14, 20);
+        let panel_fg = Color::Rgb(228, 234, 242);
+        let panel_title_fg = Color::Rgb(248, 250, 252);
+
+        if self.config.wallpaper_enabled {
+            self.draw_wallpaper(frame, area);
+        }
 
         let vertical = Layout::default()
             .direction(Direction::Vertical)
@@ -146,6 +168,7 @@ impl App {
             Focus::Terminal => "terminal",
             Focus::Explorer => "explorer",
         };
+        let mode_name = if self.tui_passthrough { "passthrough" } else { "normal" };
 
         let header = Paragraph::new(Line::from(vec![
             Span::styled(
@@ -158,15 +181,29 @@ impl App {
             Span::raw("  "),
             Span::styled(
                 format!("embedded shell: {}", self.config.shell),
-                Style::default().fg(Color::Gray),
+                Style::default().fg(panel_fg),
             ),
             Span::raw("  "),
             Span::styled(
                 format!("focus: {focus_name}"),
                 Style::default().fg(Color::Yellow),
             ),
+            Span::raw("  "),
+            Span::styled(
+                format!("mode: {mode_name}"),
+                Style::default().fg(Color::Rgb(255, 179, 71)),
+            ),
         ]))
-        .block(Block::default().borders(Borders::ALL).title("Nicu Workspace"));
+        .style(Style::default().bg(panel_bg).fg(panel_fg))
+        .block(
+            Block::default()
+                .style(Style::default().bg(panel_bg))
+                .borders(Borders::ALL)
+                .title(Line::from(Span::styled(
+                    "Nicu Workspace",
+                    Style::default().fg(panel_title_fg).add_modifier(Modifier::BOLD),
+                ))),
+        );
         frame.render_widget(header, vertical[0]);
 
         let terminal_border = if self.focus == Focus::Terminal {
@@ -176,11 +213,23 @@ impl App {
         };
 
         let terminal_text = self.parser.screen().contents();
+
+        // Fill terminal panel first so wallpaper never bleeds into untouched cells.
+        frame.render_widget(
+            Block::default().style(Style::default().bg(panel_bg)),
+            body[0],
+        );
+
         let terminal_widget = Paragraph::new(terminal_text)
+            .style(Style::default().bg(panel_bg).fg(panel_fg))
             .block(
                 Block::default()
+                    .style(Style::default().bg(panel_bg))
                     .borders(Borders::ALL)
-                    .title("Sish Terminal")
+                    .title(Line::from(Span::styled(
+                        "Sish Terminal",
+                        Style::default().fg(panel_title_fg).add_modifier(Modifier::BOLD),
+                    )))
                     .border_style(terminal_border),
             )
             .wrap(Wrap { trim: false });
@@ -195,7 +244,7 @@ impl App {
         let mut items = Vec::new();
         items.push(ListItem::new(Line::from(Span::styled(
             format!("Path: {}", self.explorer_path.display()),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(panel_fg),
         ))));
         items.push(ListItem::new(""));
 
@@ -204,9 +253,9 @@ impl App {
             let base_style = if self.focus == Focus::Explorer && self.explorer_selected == index {
                 Style::default().fg(Color::Black).bg(Color::Green)
             } else if entry.is_dir {
-                Style::default().fg(Color::LightBlue)
+                Style::default().fg(Color::Rgb(141, 218, 255))
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(panel_fg)
             };
             items.push(ListItem::new(Line::from(Span::styled(
                 format!("{marker} {}", entry.name),
@@ -223,14 +272,30 @@ impl App {
 
         let explorer = List::new(items).block(
             Block::default()
+                .style(Style::default().bg(panel_bg))
                 .borders(Borders::ALL)
-                .title("TUI Explorer")
+                .title(Line::from(Span::styled(
+                    "TUI Explorer",
+                    Style::default().fg(panel_title_fg).add_modifier(Modifier::BOLD),
+                )))
                 .border_style(explorer_border),
         );
         frame.render_widget(explorer, body[1]);
 
-        let footer = Paragraph::new(self.status.clone()).style(Style::default().fg(Color::Gray));
+        let footer = Paragraph::new(self.status.clone())
+            .style(Style::default().bg(panel_bg).fg(panel_fg));
         frame.render_widget(footer, vertical[2]);
+    }
+
+    fn draw_wallpaper(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
+        let wallpaper_lines = self.wallpaper.render(area.width, area.height);
+        if wallpaper_lines.is_empty() {
+            return;
+        }
+
+        let wallpaper = Paragraph::new(wallpaper_lines)
+            .style(Style::default().fg(Color::Rgb(30, 36, 48)));
+        frame.render_widget(wallpaper, area);
     }
 
     fn resize(&mut self, cols: u16, rows: u16) -> anyhow::Result<()> {
@@ -240,12 +305,71 @@ impl App {
 
     fn drain_shell_output(&mut self) {
         while let Ok(chunk) = self.rx.try_recv() {
-            self.parser.process(&chunk);
+            let cleaned = self.consume_shell_controls(&chunk);
+            if !cleaned.is_empty() {
+                self.parser.process(&cleaned);
+            }
         }
+    }
+
+    fn consume_shell_controls(&mut self, chunk: &[u8]) -> Vec<u8> {
+        self.shell_control_tail.extend_from_slice(chunk);
+
+        let keep = marker_suffix_len(&self.shell_control_tail);
+        let process_len = self.shell_control_tail.len().saturating_sub(keep);
+
+        let mut out = Vec::with_capacity(process_len);
+        let mut i = 0;
+        while i < process_len {
+            if i + NICU_PASSTHROUGH_ON.len() <= process_len
+                && self.shell_control_tail[i..].starts_with(NICU_PASSTHROUGH_ON)
+            {
+                self.tui_passthrough = true;
+                self.focus = Focus::Terminal;
+                self.status = "TUI直通: ON (sish-config) | Ctrl+Tで解除".to_string();
+                i += NICU_PASSTHROUGH_ON.len();
+                continue;
+            }
+
+            if i + NICU_PASSTHROUGH_OFF.len() <= process_len
+                && self.shell_control_tail[i..].starts_with(NICU_PASSTHROUGH_OFF)
+            {
+                self.tui_passthrough = false;
+                self.status = "TUI直通: OFF | Ctrl+Tで再開".to_string();
+                i += NICU_PASSTHROUGH_OFF.len();
+                continue;
+            }
+
+            out.push(self.shell_control_tail[i]);
+            i += 1;
+        }
+
+        self.shell_control_tail.drain(0..process_len);
+        out
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> anyhow::Result<bool> {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return Ok(false);
+        }
+
+        if self.tui_passthrough {
+            if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                self.tui_passthrough = false;
+                self.status = "TUI直通: OFF | Ctrl+Tで再開".to_string();
+                return Ok(false);
+            }
+
+            if let Some(bytes) = key_to_pty_bytes(key) {
+                self.shell.send_bytes(&bytes)?;
+            }
+            return Ok(false);
+        }
+
+        if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.focus = Focus::Terminal;
+            self.tui_passthrough = true;
+            self.status = "TUI直通: ON | Ctrl+Tで解除".to_string();
             return Ok(false);
         }
 
@@ -408,6 +532,65 @@ impl App {
     }
 }
 
+impl Wallpaper {
+    fn embedded() -> Self {
+        let raw = include_str!("AA/umaru.txt");
+        let lines: Vec<String> = raw.lines().map(|line| line.to_string()).collect();
+        let width = lines.iter().map(|line| line.len()).max().unwrap_or(0);
+        let height = lines.len();
+
+        Self {
+            lines,
+            width,
+            height,
+        }
+    }
+
+    fn render(&self, width: u16, height: u16) -> Vec<Line<'static>> {
+        if width == 0 || height == 0 || self.height == 0 || self.width == 0 {
+            return Vec::new();
+        }
+
+        let width = width as usize;
+        let height = height as usize;
+        let x_offset = self.width.saturating_sub(width) / 2;
+        let y_offset = self.height.saturating_sub(height) / 2;
+
+        let mut rows = Vec::with_capacity(height);
+        for row_index in 0..height {
+            let source_row = if self.height > height {
+                row_index + y_offset
+            } else {
+                row_index
+            };
+
+            let mut row = String::with_capacity(width);
+            if let Some(source_line) = self.lines.get(source_row) {
+                if self.width > width {
+                    let start = x_offset.min(source_line.len());
+                    let end = (start + width).min(source_line.len());
+                    row.push_str(&source_line[start..end]);
+                } else {
+                    row.push_str(source_line);
+                }
+            }
+
+            if row.len() < width {
+                row.extend(std::iter::repeat(' ').take(width - row.len()));
+            } else if row.len() > width {
+                row.truncate(width);
+            }
+
+            rows.push(Line::from(Span::styled(
+                row,
+                Style::default().fg(Color::Rgb(72, 78, 94)),
+            )));
+        }
+
+        rows
+    }
+}
+
 fn key_to_pty_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     let mut out = Vec::new();
 
@@ -416,6 +599,7 @@ fn key_to_pty_bytes(key: KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Tab => out.push(b'\t'),
         KeyCode::Backspace => out.push(0x7f),
         KeyCode::Esc => out.push(0x1b),
+        KeyCode::Insert => out.extend_from_slice(b"\x1b[2~"),
         KeyCode::Left => out.extend_from_slice(b"\x1b[D"),
         KeyCode::Right => out.extend_from_slice(b"\x1b[C"),
         KeyCode::Up => out.extend_from_slice(b"\x1b[A"),
@@ -431,6 +615,14 @@ fn key_to_pty_bytes(key: KeyEvent) -> Option<Vec<u8>> {
                 2 => "\x1bOQ",
                 3 => "\x1bOR",
                 4 => "\x1bOS",
+                5 => "\x1b[15~",
+                6 => "\x1b[17~",
+                7 => "\x1b[18~",
+                8 => "\x1b[19~",
+                9 => "\x1b[20~",
+                10 => "\x1b[21~",
+                11 => "\x1b[23~",
+                12 => "\x1b[24~",
                 _ => "",
             };
             if seq.is_empty() {
@@ -478,4 +670,21 @@ fn try_init_clipboard() -> Option<Clipboard> {
         return None;
     }
     Clipboard::new().ok()
+}
+
+fn marker_suffix_len(buf: &[u8]) -> usize {
+    let max = NICU_PASSTHROUGH_ON
+        .len()
+        .max(NICU_PASSTHROUGH_OFF.len())
+        .saturating_sub(1);
+    let limit = max.min(buf.len());
+
+    for n in (1..=limit).rev() {
+        if NICU_PASSTHROUGH_ON.starts_with(&buf[buf.len() - n..])
+            || NICU_PASSTHROUGH_OFF.starts_with(&buf[buf.len() - n..])
+        {
+            return n;
+        }
+    }
+    0
 }

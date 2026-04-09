@@ -6,6 +6,13 @@ RELEASE_BIN="$SCRIPT_DIR/nicu-shell/target/release/nicu"
 DEBUG_BIN="$SCRIPT_DIR/nicu-shell/target/debug/nicu"
 MANIFEST="$SCRIPT_DIR/nicu-shell/Cargo.toml"
 
+# nicu 内部で確実に Sish を起動させるため、repo の launcher を明示する。
+if [[ -x "$SCRIPT_DIR/sish" ]]; then
+    export SISH_NICU_SHELL="$SCRIPT_DIR/sish"
+    export SISH_REPO_ROOT="$SCRIPT_DIR"
+    export SISH_NICU_FORCE_SISH=1
+fi
+
 if [[ -n "${NICU_PATH:-}" && -x "$NICU_PATH" ]]; then
     exec "$NICU_PATH" "$@"
 fi

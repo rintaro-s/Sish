@@ -50,6 +50,10 @@ _sish_msg_ja() {
             local suggestion="$2"
             print -r -- "Sish：お兄ちゃん！\"$cmd\"って何？\"$suggestion\"の間違いじゃない？"
             ;;
+        "cmd_not_found_no_suggestion")
+            local cmd="$1"
+            print -r -- "Sish：お兄ちゃん！\"$cmd\" は見つからないよ…"
+            ;;
         "cmd_other_options")
             local options="$1"
             print -r -- "       ほかにも: $options"
@@ -174,6 +178,10 @@ _sish_msg_en() {
             local cmd="$1"
             local suggestion="$2"
             print -r -- "Sish: Onii-chan! \"$cmd\" isn't a command... Did you mean \"$suggestion\"?"
+            ;;
+        "cmd_not_found_no_suggestion")
+            local cmd="$1"
+            print -r -- "Sish: Onii-chan! \"$cmd\" was not found..."
             ;;
         "cmd_other_options")
             local options="$1"

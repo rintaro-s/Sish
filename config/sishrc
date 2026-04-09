@@ -238,6 +238,112 @@ oracle() {
     command chmod +x -- "$@"
 }
 
+sish_config_cmd() {
+    # Tell nicu to enter raw passthrough while running fullscreen TUIs.
+    print -nr -- $'\e]9;nicu-passthrough=on\a'
+
+    if builtin whence -w sish-config 2>/dev/null | command grep -q 'builtin'; then
+        builtin sish-config "$@"
+        local rc=$?
+        print -nr -- $'\e]9;nicu-passthrough=off\a'
+        return $rc
+    fi
+
+    local cfg="$HOME/.sishrc"
+    if [[ ! -f "$cfg" ]]; then
+        command touch "$cfg" 2>/dev/null || true
+    fi
+
+    if [[ -n "${EDITOR:-}" && -x "$(whence -p "$EDITOR" 2>/dev/null)" ]]; then
+        "$EDITOR" "$cfg"
+        local rc=$?
+        print -nr -- $'\e]9;nicu-passthrough=off\a'
+        return $rc
+    fi
+
+    if [[ -x "$(whence -p nvim 2>/dev/null)" ]]; then
+        command nvim "$cfg"
+        local rc=$?
+        print -nr -- $'\e]9;nicu-passthrough=off\a'
+        return $rc
+    fi
+
+    if [[ -x "$(whence -p vi 2>/dev/null)" ]]; then
+        command vi "$cfg"
+        local rc=$?
+        print -nr -- $'\e]9;nicu-passthrough=off\a'
+        return $rc
+    fi
+
+    if type sish_msg >/dev/null 2>&1; then
+        sish_msg "unknown_cmd" "sish-config"
+    else
+        print -r -- "Sish: sish-config を開けるエディタが見つからないよ"
+    fi
+    print -nr -- $'\e]9;nicu-passthrough=off\a'
+    return 127
+}
+
+alias sish-config='sish_config_cmd'
+
+_sish_best_command_suggestion() {
+    local cmd="$1"
+    local -a pool
+    pool=( ${(k)commands} ${(k)aliases} ${(k)functions} ${(k)builtins} )
+    typeset -aU pool
+
+    local cand
+    # 1) Prefix match first.
+    for cand in $pool; do
+        if [[ "$cand" == ${cmd}* ]]; then
+            REPLY="$cand"
+            return 0
+        fi
+    done
+
+    # 2) Approximate match with edit distance 1 (zsh pattern operator).
+    setopt localoptions extendedglob
+    for cand in $pool; do
+        if [[ "$cand" == (#a1)${cmd} ]]; then
+            REPLY="$cand"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+command_not_found_handler() {
+    local cmd="$1"
+    shift
+
+    local suggestion=""
+    if _sish_best_command_suggestion "$cmd"; then
+        suggestion="$REPLY"
+        SISH_LAST_SUGGESTION="$suggestion"
+        print -r -- "$suggestion" >| "/tmp/sish-last-suggestion-$$" 2>/dev/null || true
+
+        # Keep original args so `y` can replay: typo_cmd arg1 arg2 -> corrected_cmd arg1 arg2
+        if (( $# > 0 )); then
+            print -rl -- "$@" >| "/tmp/sish-last-args-$$" 2>/dev/null || true
+        fi
+
+        if type sish_msg >/dev/null 2>&1; then
+            sish_msg "cmd_not_found" "$cmd" "$suggestion"
+        else
+            print -r -- "Sish: command not found: $cmd (maybe: $suggestion)"
+        fi
+        return 127
+    fi
+
+    if type sish_msg >/dev/null 2>&1; then
+        sish_msg "cmd_not_found_no_suggestion" "$cmd"
+    else
+        print -r -- "Sish: command not found: $cmd"
+    fi
+    return 127
+}
+
 
 _sish_resolve_nicu() {
     local src_root="${SISH_REPO_ROOT:-}"

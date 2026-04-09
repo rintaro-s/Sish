@@ -5,10 +5,12 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub shell: String,
     pub history_limit: usize,
     pub output_limit: usize,
+    pub wallpaper_enabled: bool,
     pub keybinds: Keybinds,
     pub shortcuts: Vec<Shortcut>,
     pub macros: Vec<MacroEntry>,
@@ -50,6 +52,7 @@ impl Default for Config {
             shell: "sish".to_string(),
             history_limit: 1000,
             output_limit: 4000,
+            wallpaper_enabled: true,
             keybinds: Keybinds {
                 palette: "f1,ctrl+g".to_string(),
                 copy_input: "ctrl+y,ctrl+shift+c".to_string(),
@@ -125,7 +128,17 @@ impl Config {
             .with_context(|| format!("failed to read config: {}", path.display()))?;
         let mut config: Self = toml::from_str(&content)
             .with_context(|| format!("failed to parse config: {}", path.display()))?;
+        let original_shell = config.shell.clone();
         config.merge_defaults();
+
+        // Historical configs used /bin/zsh. For nicu, default should be Sish.
+        if should_migrate_shell_to_sish(&config.shell) {
+            config.shell = "sish".to_string();
+        }
+
+        if config.shell != original_shell {
+            let _ = config.save();
+        }
         Ok(config)
     }
 
@@ -188,7 +201,6 @@ impl Config {
         if self.output_limit == 0 {
             self.output_limit = defaults.output_limit;
         }
-
         if self.keybinds.palette.trim().is_empty() {
             self.keybinds.palette = defaults.keybinds.palette;
         }
@@ -229,6 +241,31 @@ impl Config {
         }
         self.macros = macro_map.into_values().collect();
     }
+}
+
+fn should_migrate_shell_to_sish(shell: &str) -> bool {
+    if std::env::var("SISH_NICU_ALLOW_NON_SISH")
+        .ok()
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
+    let trimmed = shell.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let program = shell_words::split(trimmed)
+        .ok()
+        .and_then(|tokens| tokens.first().cloned())
+        .unwrap_or_else(|| trimmed.to_string());
+
+    matches!(
+        program.as_str(),
+        "zsh" | "/bin/zsh" | "/usr/bin/zsh"
+    )
 }
 
 pub fn normalize_key(input: &str) -> String {

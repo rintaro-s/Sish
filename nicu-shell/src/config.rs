@@ -108,6 +108,7 @@ impl Default for Config {
     }
 }
 
+#[allow(dead_code)]
 impl Config {
     pub fn path() -> PathBuf {
         dirs::config_dir()
@@ -268,10 +269,12 @@ fn should_migrate_shell_to_sish(shell: &str) -> bool {
     )
 }
 
+#[allow(dead_code)]
 pub fn normalize_key(input: &str) -> String {
     input.trim().to_lowercase().replace(' ', "")
 }
 
+#[allow(dead_code)]
 pub fn key_event_name(event: &crossterm::event::KeyEvent) -> String {
     use crossterm::event::{KeyCode, KeyModifiers};
 

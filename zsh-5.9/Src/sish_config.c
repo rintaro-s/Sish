@@ -1372,7 +1372,7 @@ sish_show_config_menu(void)
         }
     }
 
-    if (!isatty(STDIN_FILENO)) {
+    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
         fprintf(stderr, "%s❌ sish-config: %s%s\n",
             SISH_ERROR_COLOR,
             sish_lang_is_en() ? "Requires an interactive terminal." : "対話端末じゃないと操作できないよ…",
@@ -1381,6 +1381,13 @@ sish_show_config_menu(void)
     }
     
     enable_raw_mode();
+    if (!raw_mode_enabled) {
+        fprintf(stderr, "%s❌ sish-config: %s%s\n",
+            SISH_ERROR_COLOR,
+            sish_lang_is_en() ? "Failed to enter raw terminal mode." : "端末をRawモードにできなかったよ…",
+            SISH_COLOR_RESET);
+        return;
+    }
     
     while (running) {
         if (needs_redraw) {

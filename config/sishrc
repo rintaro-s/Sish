@@ -238,17 +238,26 @@ oracle() {
     command chmod +x -- "$@"
 }
 
-sish_config_cmd() {
-    # Tell nicu to enter raw passthrough while running fullscreen TUIs.
-    print -nr -- $'\e]9;nicu-passthrough=on\a'
+_sish_config_passthrough_on() {
+    [[ -t 1 ]] || return 0
 
-    if builtin whence -w sish-config 2>/dev/null | command grep -q 'builtin'; then
-        builtin sish-config "$@"
-        local rc=$?
-        print -nr -- $'\e]9;nicu-passthrough=off\a'
-        return $rc
+    # Emit control markers only when running inside nicu.
+    if [[ -n "${SISH_NICU_FORCE_SISH:-}" || -n "${SISH_NICU_SHELL:-}" ]]; then
+        print -nr -- $'\e]9;nicu-passthrough=on\a'
+        SISH_CONFIG_PASSTHROUGH=1
     fi
+}
 
+_sish_config_passthrough_off() {
+    [[ -t 1 ]] || return 0
+
+    if [[ "${SISH_CONFIG_PASSTHROUGH:-0}" == "1" ]]; then
+        print -nr -- $'\e]9;nicu-passthrough=off\a'
+    fi
+    SISH_CONFIG_PASSTHROUGH=0
+}
+
+_sish_config_open_file() {
     local cfg="$HOME/.sishrc"
     if [[ ! -f "$cfg" ]]; then
         command touch "$cfg" 2>/dev/null || true
@@ -256,23 +265,22 @@ sish_config_cmd() {
 
     if [[ -n "${EDITOR:-}" && -x "$(whence -p "$EDITOR" 2>/dev/null)" ]]; then
         "$EDITOR" "$cfg"
-        local rc=$?
-        print -nr -- $'\e]9;nicu-passthrough=off\a'
-        return $rc
+        return $?
     fi
 
     if [[ -x "$(whence -p nvim 2>/dev/null)" ]]; then
         command nvim "$cfg"
-        local rc=$?
-        print -nr -- $'\e]9;nicu-passthrough=off\a'
-        return $rc
+        return $?
     fi
 
     if [[ -x "$(whence -p vi 2>/dev/null)" ]]; then
         command vi "$cfg"
-        local rc=$?
-        print -nr -- $'\e]9;nicu-passthrough=off\a'
-        return $rc
+        return $?
+    fi
+
+    if [[ -x "$(whence -p nano 2>/dev/null)" ]]; then
+        command nano "$cfg"
+        return $?
     fi
 
     if type sish_msg >/dev/null 2>&1; then
@@ -280,8 +288,40 @@ sish_config_cmd() {
     else
         print -r -- "Sish: sish-config を開けるエディタが見つからないよ"
     fi
-    print -nr -- $'\e]9;nicu-passthrough=off\a'
     return 127
+}
+
+sish_config_cmd() {
+    emulate -L zsh
+    setopt localoptions localtraps no_aliases
+
+    local has_tty=0
+    local has_builtin=0
+    local rc=0
+
+    [[ -o interactive && -t 0 && -t 1 ]] && has_tty=1
+    (( ${+builtins[sish-config]} )) && has_builtin=1
+
+    trap '_sish_config_passthrough_off; command stty sane 2>/dev/null || true' EXIT INT TERM HUP QUIT
+
+    if (( has_builtin && has_tty )); then
+        _sish_config_passthrough_on
+        builtin sish-config "$@"
+        rc=$?
+        command stty sane 2>/dev/null || true
+        return $rc
+    fi
+
+    if (( ! has_tty )); then
+        print -r -- "sish-config: interactive TUI unavailable (no tty)."
+        print -r -- "sish-config: edit $HOME/.sishrc directly."
+        return 2
+    fi
+
+    _sish_config_open_file "$@"
+    rc=$?
+    command stty sane 2>/dev/null || true
+    return $rc
 }
 
 alias sish-config='sish_config_cmd'

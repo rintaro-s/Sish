@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SISH_LAUNCHER="${SISH_LAUNCHER:-$SCRIPT_DIR/sish}"
+CFG_FILE="${HOME:-}/.sishrc"
+
+open_config_file() {
+    if [[ -n "${EDITOR:-}" ]] && command -v "$EDITOR" >/dev/null 2>&1; then
+        exec "$EDITOR" "$CFG_FILE"
+    fi
+
+    for editor in nvim vi nano; do
+        if command -v "$editor" >/dev/null 2>&1; then
+            exec "$editor" "$CFG_FILE"
+        fi
+    done
+
+    echo "sish-config: no editor found. Please edit $CFG_FILE manually." >&2
+    exit 127
+}
+
+if [[ ! -f "$CFG_FILE" ]]; then
+    touch "$CFG_FILE" 2>/dev/null || true
+fi
+
+if [[ "${1:-}" == "--edit" ]]; then
+    open_config_file
+fi
+
+if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "sish-config: interactive TUI unavailable (no tty)." >&2
+    echo "sish-config: use '--edit' or edit $CFG_FILE directly." >&2
+    exit 2
+fi
+
+if [[ -x "$SISH_LAUNCHER" ]]; then
+    exec "$SISH_LAUNCHER" -ic 'if (( ${+builtins[sish-config]} )); then builtin sish-config; else print -u2 -- "sish-config builtin is unavailable"; exit 127; fi'
+fi
+
+open_config_file

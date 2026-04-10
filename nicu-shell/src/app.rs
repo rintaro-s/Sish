@@ -12,13 +12,13 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use ratatui::Terminal;
 use std::fs;
 use std::io::{self, Stdout};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const NICU_PASSTHROUGH_ON: &[u8] = b"\x1b]9;nicu-passthrough=on\x07";
 const NICU_PASSTHROUGH_OFF: &[u8] = b"\x1b]9;nicu-passthrough=off\x07";
@@ -55,6 +55,9 @@ struct App {
     explorer_selected: usize,
     show_hidden: bool,
     tui_passthrough: bool,
+    auto_tui_until: Option<Instant>,
+    last_ctrl_chord: Option<(KeyCode, KeyModifiers, Instant)>,
+    last_ctrl_g_sent_at: Option<Instant>,
     shell_control_tail: Vec<u8>,
     status: String,
     clipboard: Option<Clipboard>,
@@ -125,6 +128,9 @@ impl App {
             explorer_selected: 0,
             show_hidden: false,
             tui_passthrough: false,
+            auto_tui_until: None,
+            last_ctrl_chord: None,
+            last_ctrl_g_sent_at: None,
             shell_control_tail: Vec::new(),
             status: "Ctrl+Q:終了 | Ctrl+E/F1: Explorer切替 | Ctrl+T:TUI直通ON/OFF".to_string(),
             clipboard: try_init_clipboard(),
@@ -140,9 +146,31 @@ impl App {
         let panel_bg = Color::Rgb(11, 14, 20);
         let panel_fg = Color::Rgb(228, 234, 242);
         let panel_title_fg = Color::Rgb(248, 250, 252);
+        let auto_tui = self.auto_tui_active();
+        let passthrough_active = self.effective_passthrough();
 
-        if self.config.wallpaper_enabled {
+        // Always clear full frame to avoid stale UI artifacts when layout switches.
+        frame.render_widget(Block::default().style(Style::default().bg(panel_bg)), area);
+
+        if self.wallpaper_visible() {
             self.draw_wallpaper(frame, area);
+        }
+
+        // Native TUI mode: give the child app the full viewport for correct bottom/help lines.
+        if passthrough_active {
+            let terminal_area = area;
+            let terminal_cols = terminal_area.width.max(1);
+            let terminal_rows = terminal_area.height.max(1);
+            if terminal_cols != self.parser_cols || terminal_rows != self.parser_rows {
+                self.parser_cols = terminal_cols;
+                self.parser_rows = terminal_rows;
+                self.parser.set_size(terminal_rows, terminal_cols);
+                let _ = self.shell.resize(terminal_cols, terminal_rows);
+            }
+
+            self.render_terminal_cells(frame, terminal_area, terminal_rows, terminal_cols, false, panel_fg, panel_bg);
+            self.render_terminal_cursor(frame, terminal_area, terminal_rows, terminal_cols, false);
+            return;
         }
 
         let vertical = Layout::default()
@@ -155,8 +183,11 @@ impl App {
             .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
             .split(vertical[1]);
 
-        let terminal_cols = body[0].width.saturating_sub(2).max(1);
-        let terminal_rows = body[0].height.saturating_sub(2).max(1);
+        let terminal_area = body[0];
+        let explorer_area = body[1];
+
+        let terminal_cols = terminal_area.width.saturating_sub(2).max(1);
+        let terminal_rows = terminal_area.height.saturating_sub(2).max(1);
         if terminal_cols != self.parser_cols || terminal_rows != self.parser_rows {
             self.parser_cols = terminal_cols;
             self.parser_rows = terminal_rows;
@@ -168,7 +199,13 @@ impl App {
             Focus::Terminal => "terminal",
             Focus::Explorer => "explorer",
         };
-        let mode_name = if self.tui_passthrough { "passthrough" } else { "normal" };
+        let mode_name = if self.tui_passthrough {
+            "passthrough(manual)"
+        } else if auto_tui {
+            "passthrough(auto)"
+        } else {
+            "normal"
+        };
 
         let header = Paragraph::new(Line::from(vec![
             Span::styled(
@@ -212,28 +249,19 @@ impl App {
             Style::default().fg(Color::DarkGray)
         };
 
-        let terminal_text = self.parser.screen().contents();
+        frame.render_widget(Block::default().style(Style::default().bg(panel_bg)), terminal_area);
 
-        // Fill terminal panel first so wallpaper never bleeds into untouched cells.
-        frame.render_widget(
-            Block::default().style(Style::default().bg(panel_bg)),
-            body[0],
-        );
-
-        let terminal_widget = Paragraph::new(terminal_text)
-            .style(Style::default().bg(panel_bg).fg(panel_fg))
-            .block(
-                Block::default()
-                    .style(Style::default().bg(panel_bg))
-                    .borders(Borders::ALL)
-                    .title(Line::from(Span::styled(
-                        "Sish Terminal",
-                        Style::default().fg(panel_title_fg).add_modifier(Modifier::BOLD),
-                    )))
-                    .border_style(terminal_border),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(terminal_widget, body[0]);
+        let terminal_block = Block::default()
+            .style(Style::default().bg(panel_bg))
+            .borders(Borders::ALL)
+            .title(Line::from(Span::styled(
+                "Sish Terminal",
+                Style::default().fg(panel_title_fg).add_modifier(Modifier::BOLD),
+            )))
+            .border_style(terminal_border);
+        frame.render_widget(terminal_block, terminal_area);
+        self.render_terminal_cells(frame, terminal_area, terminal_rows, terminal_cols, true, panel_fg, panel_bg);
+        self.render_terminal_cursor(frame, terminal_area, terminal_rows, terminal_cols, true);
 
         let explorer_border = if self.focus == Focus::Explorer {
             Style::default().fg(Color::LightGreen)
@@ -280,9 +308,10 @@ impl App {
                 )))
                 .border_style(explorer_border),
         );
-        frame.render_widget(explorer, body[1]);
+        frame.render_widget(explorer, explorer_area);
 
-        let footer = Paragraph::new(self.status.clone())
+        let footer_text = self.status.clone();
+        let footer = Paragraph::new(footer_text)
             .style(Style::default().bg(panel_bg).fg(panel_fg));
         frame.render_widget(footer, vertical[2]);
     }
@@ -298,9 +327,131 @@ impl App {
         frame.render_widget(wallpaper, area);
     }
 
+    fn wallpaper_visible(&self) -> bool {
+        if !self.config.wallpaper_enabled {
+            return false;
+        }
+
+        if self.effective_passthrough() {
+            return false;
+        }
+
+        true
+    }
+
+    fn tui_detected(&self) -> bool {
+        let screen = self.parser.screen();
+        screen.alternate_screen()
+            || screen.application_cursor()
+            || !matches!(screen.mouse_protocol_mode(), vt100::MouseProtocolMode::None)
+    }
+
+    fn auto_tui_active(&self) -> bool {
+        if self.tui_detected() {
+            return true;
+        }
+
+        self.auto_tui_until
+            .map(|until| Instant::now() <= until)
+            .unwrap_or(false)
+    }
+
+    fn effective_passthrough(&self) -> bool {
+        self.tui_passthrough || self.auto_tui_active()
+    }
+
+    fn render_terminal_cursor(
+        &self,
+        frame: &mut ratatui::Frame<'_>,
+        terminal_area: ratatui::layout::Rect,
+        rows: u16,
+        cols: u16,
+        with_border: bool,
+    ) {
+        let screen = self.parser.screen();
+        if screen.hide_cursor() || rows == 0 || cols == 0 {
+            return;
+        }
+
+        let (row, mut col) = screen.cursor_position();
+        if row >= rows {
+            return;
+        }
+
+        col = col.min(cols.saturating_sub(1));
+        if col > 0
+            && screen
+                .cell(row, col)
+                .map(vt100::Cell::is_wide_continuation)
+                .unwrap_or(false)
+        {
+            col -= 1;
+        }
+
+        let border = u16::from(with_border);
+        let x = terminal_area.x.saturating_add(border).saturating_add(col);
+        let y = terminal_area.y.saturating_add(border).saturating_add(row);
+        let max_x = terminal_area
+            .x
+            .saturating_add(terminal_area.width.saturating_sub(1 + border));
+        let max_y = terminal_area
+            .y
+            .saturating_add(terminal_area.height.saturating_sub(1 + border));
+
+        if x <= max_x && y <= max_y {
+            frame.set_cursor_position((x, y));
+        }
+    }
+
+    fn should_swallow_ctrl_chord(&mut self, key: KeyEvent) -> bool {
+        if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
+            return false;
+        }
+
+        let now = Instant::now();
+
+        if key.kind == KeyEventKind::Repeat {
+            self.last_ctrl_chord = Some((key.code.clone(), key.modifiers, now));
+            return true;
+        }
+
+        let duplicate = self
+            .last_ctrl_chord
+            .as_ref()
+            .map(|(code, modifiers, at)| {
+                *code == key.code
+                    && *modifiers == key.modifiers
+                    && now.saturating_duration_since(*at) < Duration::from_millis(260)
+            })
+            .unwrap_or(false);
+
+        self.last_ctrl_chord = Some((key.code, key.modifiers, now));
+        duplicate
+    }
+
     fn resize(&mut self, cols: u16, rows: u16) -> anyhow::Result<()> {
-        let pty_rows = rows.saturating_sub(3).max(1);
-        self.shell.resize(cols, pty_rows)
+        // Actual PTY sizing is handled in draw() from the active layout.
+        // Doing it here causes conflicting resize events and TUI glitches.
+        let _ = (cols, rows);
+        Ok(())
+    }
+
+    fn should_throttle_ctrl_g(&mut self, key: KeyEvent) -> bool {
+        if key.code != KeyCode::Char('g') || !key.modifiers.contains(KeyModifiers::CONTROL) {
+            return false;
+        }
+
+        let now = Instant::now();
+        let throttled = self
+            .last_ctrl_g_sent_at
+            .map(|at| now.saturating_duration_since(at) < Duration::from_millis(900))
+            .unwrap_or(false);
+
+        if !throttled {
+            self.last_ctrl_g_sent_at = Some(now);
+        }
+
+        throttled
     }
 
     fn drain_shell_output(&mut self) {
@@ -308,7 +459,19 @@ impl App {
             let cleaned = self.consume_shell_controls(&chunk);
             if !cleaned.is_empty() {
                 self.parser.process(&cleaned);
+                if self.tui_detected() {
+                    self.auto_tui_until = Some(Instant::now() + Duration::from_millis(800));
+                }
             }
+        }
+
+        if !self.tui_detected()
+            && self
+                .auto_tui_until
+                .map(|until| Instant::now() > until)
+                .unwrap_or(false)
+        {
+            self.auto_tui_until = None;
         }
     }
 
@@ -353,23 +516,46 @@ impl App {
             return Ok(false);
         }
 
-        if self.tui_passthrough {
-            if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                self.tui_passthrough = false;
-                self.status = "TUI直通: OFF | Ctrl+Tで再開".to_string();
-                return Ok(false);
-            }
-
-            if let Some(bytes) = key_to_pty_bytes(key) {
-                self.shell.send_bytes(&bytes)?;
-            }
+        if self.should_swallow_ctrl_chord(key) {
             return Ok(false);
         }
 
-        if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.focus = Focus::Terminal;
+        let auto_tui = self.auto_tui_active();
+
+        if key.code == KeyCode::Char('g')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && !self.effective_passthrough()
+        {
             self.tui_passthrough = true;
-            self.status = "TUI直通: ON | Ctrl+Tで解除".to_string();
+            self.auto_tui_until = Some(Instant::now() + Duration::from_secs(3));
+            self.status = "TUI直通: ON(auto-launch) | Ctrl+Tで解除".to_string();
+        }
+
+        // Do not steal Ctrl+T while a child TUI is active; forward it natively.
+        if key.code == KeyCode::Char('t')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && !auto_tui
+        {
+            self.focus = Focus::Terminal;
+            self.tui_passthrough = !self.tui_passthrough;
+            self.status = if self.tui_passthrough {
+                "TUI直通: ON(manual) | Ctrl+Tで解除".to_string()
+            } else {
+                "TUI直通: OFF(manual) | 自動判定は継続".to_string()
+            };
+            return Ok(false);
+        }
+
+        let passthrough_active = self.effective_passthrough();
+
+        if passthrough_active {
+            if self.should_throttle_ctrl_g(key) {
+                return Ok(false);
+            }
+
+            if let Some(bytes) = self.key_to_pty_bytes(key) {
+                self.shell.send_bytes(&bytes)?;
+            }
             return Ok(false);
         }
 
@@ -399,7 +585,7 @@ impl App {
     }
 
     fn handle_terminal_key(&mut self, key: KeyEvent) -> anyhow::Result<bool> {
-        if let Some(bytes) = key_to_pty_bytes(key) {
+        if let Some(bytes) = self.key_to_pty_bytes(key) {
             self.shell.send_bytes(&bytes)?;
         }
         Ok(false)
@@ -451,7 +637,7 @@ impl App {
                 }
             }
             _ => {
-                if let Some(bytes) = key_to_pty_bytes(key) {
+                if let Some(bytes) = self.key_to_pty_bytes(key) {
                     self.shell.send_bytes(&bytes)?;
                 }
             }
@@ -530,6 +716,48 @@ impl App {
             self.status = "clipboard copy failed".to_string();
         }
     }
+
+    fn render_terminal_cells(
+        &self,
+        frame: &mut ratatui::Frame<'_>,
+        terminal_area: ratatui::layout::Rect,
+        rows: u16,
+        cols: u16,
+        with_border: bool,
+        default_fg: Color,
+        default_bg: Color,
+    ) {
+        let screen = self.parser.screen();
+        let border = u16::from(with_border);
+        let x0 = terminal_area.x.saturating_add(border);
+        let y0 = terminal_area.y.saturating_add(border);
+        let draw_cols = cols.min(terminal_area.width.saturating_sub(border * 2));
+        let draw_rows = rows.min(terminal_area.height.saturating_sub(border * 2));
+        let buf = frame.buffer_mut();
+
+        for row in 0..draw_rows {
+            for col in 0..draw_cols {
+                let Some(cell) = screen.cell(row, col) else {
+                    continue;
+                };
+
+                if cell.is_wide_continuation() {
+                    continue;
+                }
+
+                let style = style_from_vt_cell(cell, default_fg, default_bg);
+                let text = cell.contents();
+                let symbol = if text.is_empty() { " " } else { text.as_str() };
+                let x = x0 + col;
+                let y = y0 + row;
+                buf[(x, y)].set_symbol(symbol).set_style(style);
+            }
+        }
+    }
+
+    fn key_to_pty_bytes(&self, key: KeyEvent) -> Option<Vec<u8>> {
+        key_to_pty_bytes(key, self.parser.screen().application_cursor())
+    }
 }
 
 impl Wallpaper {
@@ -591,7 +819,7 @@ impl Wallpaper {
     }
 }
 
-fn key_to_pty_bytes(key: KeyEvent) -> Option<Vec<u8>> {
+fn key_to_pty_bytes(key: KeyEvent, application_cursor: bool) -> Option<Vec<u8>> {
     let mut out = Vec::new();
 
     match key.code {
@@ -600,12 +828,48 @@ fn key_to_pty_bytes(key: KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Backspace => out.push(0x7f),
         KeyCode::Esc => out.push(0x1b),
         KeyCode::Insert => out.extend_from_slice(b"\x1b[2~"),
-        KeyCode::Left => out.extend_from_slice(b"\x1b[D"),
-        KeyCode::Right => out.extend_from_slice(b"\x1b[C"),
-        KeyCode::Up => out.extend_from_slice(b"\x1b[A"),
-        KeyCode::Down => out.extend_from_slice(b"\x1b[B"),
-        KeyCode::Home => out.extend_from_slice(b"\x1b[H"),
-        KeyCode::End => out.extend_from_slice(b"\x1b[F"),
+        KeyCode::Left => {
+            if application_cursor {
+                out.extend_from_slice(b"\x1bOD");
+            } else {
+                out.extend_from_slice(b"\x1b[D");
+            }
+        }
+        KeyCode::Right => {
+            if application_cursor {
+                out.extend_from_slice(b"\x1bOC");
+            } else {
+                out.extend_from_slice(b"\x1b[C");
+            }
+        }
+        KeyCode::Up => {
+            if application_cursor {
+                out.extend_from_slice(b"\x1bOA");
+            } else {
+                out.extend_from_slice(b"\x1b[A");
+            }
+        }
+        KeyCode::Down => {
+            if application_cursor {
+                out.extend_from_slice(b"\x1bOB");
+            } else {
+                out.extend_from_slice(b"\x1b[B");
+            }
+        }
+        KeyCode::Home => {
+            if application_cursor {
+                out.extend_from_slice(b"\x1bOH");
+            } else {
+                out.extend_from_slice(b"\x1b[H");
+            }
+        }
+        KeyCode::End => {
+            if application_cursor {
+                out.extend_from_slice(b"\x1bOF");
+            } else {
+                out.extend_from_slice(b"\x1b[F");
+            }
+        }
         KeyCode::Delete => out.extend_from_slice(b"\x1b[3~"),
         KeyCode::PageUp => out.extend_from_slice(b"\x1b[5~"),
         KeyCode::PageDown => out.extend_from_slice(b"\x1b[6~"),
@@ -655,6 +919,35 @@ fn key_to_pty_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     }
 
     Some(out)
+}
+
+fn style_from_vt_cell(cell: &vt100::Cell, default_fg: Color, default_bg: Color) -> Style {
+    let mut fg = vt_color_to_ratatui(cell.fgcolor(), default_fg);
+    let mut bg = vt_color_to_ratatui(cell.bgcolor(), default_bg);
+
+    if cell.inverse() {
+        std::mem::swap(&mut fg, &mut bg);
+    }
+
+    let mut style = Style::default().fg(fg).bg(bg);
+    if cell.bold() {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if cell.italic() {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if cell.underline() {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    style
+}
+
+fn vt_color_to_ratatui(color: vt100::Color, default: Color) -> Color {
+    match color {
+        vt100::Color::Default => default,
+        vt100::Color::Idx(idx) => Color::Indexed(idx),
+        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
 }
 
 fn shell_quote(path: &Path) -> String {

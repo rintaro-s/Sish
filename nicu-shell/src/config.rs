@@ -12,11 +12,13 @@ pub struct Config {
     pub output_limit: usize,
     pub wallpaper_enabled: bool,
     pub keybinds: Keybinds,
+    pub llm: LlmConfig,
     pub shortcuts: Vec<Shortcut>,
     pub macros: Vec<MacroEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Keybinds {
     pub palette: String,
     pub copy_input: String,
@@ -25,6 +27,68 @@ pub struct Keybinds {
     pub clear_output: String,
     pub history_prev: String,
     pub history_next: String,
+    pub quit: String,
+    pub focus_toggle: String,
+    pub passthrough_toggle: String,
+    pub explorer_up: String,
+    pub explorer_down: String,
+    pub explorer_parent: String,
+    pub explorer_open: String,
+    pub explorer_refresh: String,
+    pub explorer_toggle_hidden: String,
+    pub explorer_top: String,
+    pub explorer_bottom: String,
+    pub explorer_page_up: String,
+    pub explorer_page_down: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmConfig {
+    pub enabled: bool,
+    pub endpoint: String,
+    pub model: String,
+    pub max_tokens: usize,
+    pub auto_explain: bool,
+}
+
+impl Default for Keybinds {
+    fn default() -> Self {
+        Self {
+            palette: "f1,alt+space".to_string(),
+            copy_input: "alt+y,ctrl+shift+c".to_string(),
+            copy_output: "alt+o,alt+c".to_string(),
+            paste: "ctrl+shift+v,shift+insert".to_string(),
+            clear_output: "ctrl+l".to_string(),
+            history_prev: "up".to_string(),
+            history_next: "down".to_string(),
+            quit: "alt+q,f12".to_string(),
+            focus_toggle: "alt+e,f1".to_string(),
+            passthrough_toggle: "alt+t".to_string(),
+            explorer_up: "k,up".to_string(),
+            explorer_down: "j,down".to_string(),
+            explorer_parent: "h,left,backspace,-".to_string(),
+            explorer_open: "l,right,enter".to_string(),
+            explorer_refresh: "r".to_string(),
+            explorer_toggle_hidden: ".".to_string(),
+            explorer_top: "g,home".to_string(),
+            explorer_bottom: "shift+g,end".to_string(),
+            explorer_page_up: "ctrl+u,pageup".to_string(),
+            explorer_page_down: "ctrl+d,pagedown".to_string(),
+        }
+    }
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: String::new(),
+            model: String::new(),
+            max_tokens: 2000,
+            auto_explain: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,15 +117,8 @@ impl Default for Config {
             history_limit: 1000,
             output_limit: 4000,
             wallpaper_enabled: true,
-            keybinds: Keybinds {
-                palette: "f1,ctrl+g".to_string(),
-                copy_input: "ctrl+y,ctrl+shift+c".to_string(),
-                copy_output: "ctrl+o,alt+c".to_string(),
-                paste: "ctrl+v,shift+insert".to_string(),
-                clear_output: "ctrl+l".to_string(),
-                history_prev: "up".to_string(),
-                history_next: "down".to_string(),
-            },
+            keybinds: Keybinds::default(),
+            llm: LlmConfig::default(),
             shortcuts: vec![
                 Shortcut {
                     name: "git-status".to_string(),
@@ -120,7 +177,8 @@ impl Config {
     pub fn load() -> anyhow::Result<Self> {
         let path = Self::path();
         if !path.exists() {
-            let config = Self::default();
+            let mut config = Self::default();
+            config.apply_sish_overrides();
             config.save()?;
             return Ok(config);
         }
@@ -131,13 +189,16 @@ impl Config {
             .with_context(|| format!("failed to parse config: {}", path.display()))?;
         let original_shell = config.shell.clone();
         config.merge_defaults();
+        let migrated_legacy_keybinds = config.migrate_legacy_keybinds();
 
         // Historical configs used /bin/zsh. For nicu, default should be Sish.
         if should_migrate_shell_to_sish(&config.shell) {
             config.shell = "sish".to_string();
         }
 
-        if config.shell != original_shell {
+        config.apply_sish_overrides();
+
+        if config.shell != original_shell || migrated_legacy_keybinds {
             let _ = config.save();
         }
         Ok(config)
@@ -190,6 +251,10 @@ impl Config {
             .any(|value| value == event_name)
     }
 
+    pub fn llm_ready(&self) -> bool {
+        self.llm.enabled && !self.llm.endpoint.trim().is_empty()
+    }
+
     fn merge_defaults(&mut self) {
         let defaults = Self::default();
 
@@ -223,6 +288,54 @@ impl Config {
         if self.keybinds.history_next.trim().is_empty() {
             self.keybinds.history_next = defaults.keybinds.history_next;
         }
+        if self.keybinds.quit.trim().is_empty() {
+            self.keybinds.quit = defaults.keybinds.quit;
+        }
+        if self.keybinds.focus_toggle.trim().is_empty() {
+            self.keybinds.focus_toggle = defaults.keybinds.focus_toggle;
+        }
+        if self.keybinds.passthrough_toggle.trim().is_empty() {
+            self.keybinds.passthrough_toggle = defaults.keybinds.passthrough_toggle;
+        }
+        if self.keybinds.explorer_up.trim().is_empty() {
+            self.keybinds.explorer_up = defaults.keybinds.explorer_up;
+        }
+        if self.keybinds.explorer_down.trim().is_empty() {
+            self.keybinds.explorer_down = defaults.keybinds.explorer_down;
+        }
+        if self.keybinds.explorer_parent.trim().is_empty() {
+            self.keybinds.explorer_parent = defaults.keybinds.explorer_parent;
+        }
+        if self.keybinds.explorer_open.trim().is_empty() {
+            self.keybinds.explorer_open = defaults.keybinds.explorer_open;
+        }
+        if self.keybinds.explorer_refresh.trim().is_empty() {
+            self.keybinds.explorer_refresh = defaults.keybinds.explorer_refresh;
+        }
+        if self.keybinds.explorer_toggle_hidden.trim().is_empty() {
+            self.keybinds.explorer_toggle_hidden = defaults.keybinds.explorer_toggle_hidden;
+        }
+        if self.keybinds.explorer_top.trim().is_empty() {
+            self.keybinds.explorer_top = defaults.keybinds.explorer_top;
+        }
+        if self.keybinds.explorer_bottom.trim().is_empty() {
+            self.keybinds.explorer_bottom = defaults.keybinds.explorer_bottom;
+        }
+        if self.keybinds.explorer_page_up.trim().is_empty() {
+            self.keybinds.explorer_page_up = defaults.keybinds.explorer_page_up;
+        }
+        if self.keybinds.explorer_page_down.trim().is_empty() {
+            self.keybinds.explorer_page_down = defaults.keybinds.explorer_page_down;
+        }
+        if self.llm.endpoint.trim().is_empty() {
+            self.llm.endpoint = defaults.llm.endpoint;
+        }
+        if self.llm.model.trim().is_empty() {
+            self.llm.model = defaults.llm.model;
+        }
+        if self.llm.max_tokens == 0 {
+            self.llm.max_tokens = defaults.llm.max_tokens;
+        }
 
         let mut shortcut_map = BTreeMap::new();
         for shortcut in defaults.shortcuts {
@@ -241,6 +354,72 @@ impl Config {
             macro_map.insert(entry.name.clone(), entry.clone());
         }
         self.macros = macro_map.into_values().collect();
+    }
+
+    fn apply_sish_overrides(&mut self) {
+        let exports = load_sish_exports();
+
+        if let Some(value) = env_or_export("SISH_LLM_ENABLE", &exports) {
+            self.llm.enabled = parse_bool_like(&value);
+        }
+        if let Some(value) = env_or_export("SISH_LLM_ENDPOINT", &exports) {
+            self.llm.endpoint = value;
+        }
+        if let Some(value) = env_or_export("SISH_LLM_MODEL", &exports) {
+            self.llm.model = value;
+        }
+        if let Some(value) = env_or_export("SISH_LLM_MAX_TOKENS", &exports) {
+            if let Ok(parsed) = value.parse::<usize>() {
+                self.llm.max_tokens = parsed.max(1);
+            }
+        }
+        if let Some(value) = env_or_export("SISH_LLM_AUTO_EXPLAIN", &exports) {
+            self.llm.auto_explain = parse_bool_like(&value);
+        }
+    }
+
+    fn migrate_legacy_keybinds(&mut self) -> bool {
+        let mut changed = false;
+
+        changed |= migrate_keybind(&mut self.keybinds.palette, "f1,ctrl+g", "f1,alt+space");
+        changed |= migrate_keybind(
+            &mut self.keybinds.copy_input,
+            "ctrl+y,ctrl+shift+c",
+            "alt+y,ctrl+shift+c",
+        );
+        changed |= migrate_keybind(&mut self.keybinds.copy_output, "ctrl+o,alt+c", "alt+o,alt+c");
+        changed |= migrate_keybind(
+            &mut self.keybinds.paste,
+            "ctrl+v,shift+insert",
+            "ctrl+shift+v,shift+insert",
+        );
+        changed |= migrate_keybind(&mut self.keybinds.quit, "ctrl+q", "alt+q,f12");
+        changed |= migrate_keybind(&mut self.keybinds.focus_toggle, "ctrl+e", "alt+e,f1");
+        changed |= migrate_keybind(&mut self.keybinds.passthrough_toggle, "ctrl+p", "alt+t");
+        changed |= migrate_keybind(&mut self.keybinds.explorer_up, "ctrl+k", "k,up");
+        changed |= migrate_keybind(&mut self.keybinds.explorer_down, "ctrl+j", "j,down");
+        changed |= migrate_keybind(
+            &mut self.keybinds.explorer_parent,
+            "ctrl+shift+h",
+            "h,left,backspace,-",
+        );
+        changed |= migrate_keybind(&mut self.keybinds.explorer_open, "ctrl+o", "l,right,enter");
+        changed |= migrate_keybind(&mut self.keybinds.explorer_refresh, "ctrl+r", "r");
+        changed |= migrate_keybind(&mut self.keybinds.explorer_toggle_hidden, "ctrl+shift+.", ".");
+        changed |= migrate_keybind(&mut self.keybinds.explorer_top, "ctrl+shift+k", "g,home");
+        changed |= migrate_keybind(&mut self.keybinds.explorer_bottom, "ctrl+shift+j", "shift+g,end");
+        changed |= migrate_keybind(
+            &mut self.keybinds.explorer_page_up,
+            "ctrl+shift+up",
+            "ctrl+u,pageup",
+        );
+        changed |= migrate_keybind(
+            &mut self.keybinds.explorer_page_down,
+            "ctrl+shift+down",
+            "ctrl+d,pagedown",
+        );
+
+        changed
     }
 }
 
@@ -267,6 +446,72 @@ fn should_migrate_shell_to_sish(shell: &str) -> bool {
         program.as_str(),
         "zsh" | "/bin/zsh" | "/usr/bin/zsh"
     )
+}
+
+fn load_sish_exports() -> BTreeMap<String, String> {
+    let path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".sishrc");
+
+    let Ok(content) = fs::read_to_string(path) else {
+        return BTreeMap::new();
+    };
+
+    content
+        .lines()
+        .filter_map(parse_export_line)
+        .collect()
+}
+
+fn parse_export_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+
+    let rest = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+    let (key, value) = rest.split_once('=')?;
+    let key = key.trim();
+    if key.is_empty() || !key.starts_with("SISH_") {
+        return None;
+    }
+
+    Some((key.to_string(), unquote_shell_value(value.trim())))
+}
+
+fn unquote_shell_value(value: &str) -> String {
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        return value[1..value.len() - 1].to_string();
+    }
+
+    if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
+        return value[1..value.len() - 1].replace("'\\''", "'");
+    }
+
+    value.to_string()
+}
+
+fn env_or_export(key: &str, exports: &BTreeMap<String, String>) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| exports.get(key).cloned().filter(|value| !value.trim().is_empty()))
+}
+
+fn parse_bool_like(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn migrate_keybind(current: &mut String, legacy: &str, replacement: &str) -> bool {
+    if normalize_key(current) == normalize_key(legacy) {
+        *current = replacement.to_string();
+        return true;
+    }
+
+    false
 }
 
 #[allow(dead_code)]

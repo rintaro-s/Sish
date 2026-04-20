@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{key_event_name, Config, MacroEntry, Shortcut};
 use crate::shell::ShellSession;
 use anyhow::Context;
 use arboard::Clipboard;
@@ -22,6 +22,8 @@ use std::time::{Duration, Instant};
 
 const NICU_PASSTHROUGH_ON: &[u8] = b"\x1b]9;nicu-passthrough=on\x07";
 const NICU_PASSTHROUGH_OFF: &[u8] = b"\x1b]9;nicu-passthrough=off\x07";
+const NICU_OSC_PREFIX: &[u8] = b"\x1b]9;";
+const NICU_OSC_TERMINATOR: u8 = 0x07;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Focus {
@@ -56,10 +58,9 @@ struct App {
     show_hidden: bool,
     tui_passthrough: bool,
     auto_tui_until: Option<Instant>,
-    last_ctrl_chord: Option<(KeyCode, KeyModifiers, Instant)>,
-    last_ctrl_g_sent_at: Option<Instant>,
     shell_control_tail: Vec<u8>,
     status: String,
+    llm_preview: String,
     clipboard: Option<Clipboard>,
     wallpaper: Wallpaper,
 }
@@ -129,15 +130,15 @@ impl App {
             show_hidden: false,
             tui_passthrough: false,
             auto_tui_until: None,
-            last_ctrl_chord: None,
-            last_ctrl_g_sent_at: None,
             shell_control_tail: Vec::new(),
-            status: "Ctrl+Q:終了 | Ctrl+E/F1: Explorer切替 | Ctrl+T:TUI直通ON/OFF".to_string(),
+            status: String::new(),
+            llm_preview: String::new(),
             clipboard: try_init_clipboard(),
             wallpaper: Wallpaper::embedded(),
         };
 
         app.refresh_explorer();
+        app.status = app.default_status();
         app
     }
 
@@ -206,6 +207,7 @@ impl App {
         } else {
             "normal"
         };
+        let llm_status = self.llm_status();
 
         let header = Paragraph::new(Line::from(vec![
             Span::styled(
@@ -230,6 +232,8 @@ impl App {
                 format!("mode: {mode_name}"),
                 Style::default().fg(Color::Rgb(255, 179, 71)),
             ),
+            Span::raw("  "),
+            Span::styled(llm_status, Style::default().fg(Color::LightMagenta)),
         ]))
         .style(Style::default().bg(panel_bg).fg(panel_fg))
         .block(
@@ -303,7 +307,7 @@ impl App {
                 .style(Style::default().bg(panel_bg))
                 .borders(Borders::ALL)
                 .title(Line::from(Span::styled(
-                    "TUI Explorer",
+                    self.explorer_title(),
                     Style::default().fg(panel_title_fg).add_modifier(Modifier::BOLD),
                 )))
                 .border_style(explorer_border),
@@ -403,55 +407,11 @@ impl App {
         }
     }
 
-    fn should_swallow_ctrl_chord(&mut self, key: KeyEvent) -> bool {
-        if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-            return false;
-        }
-
-        let now = Instant::now();
-
-        if key.kind == KeyEventKind::Repeat {
-            self.last_ctrl_chord = Some((key.code.clone(), key.modifiers, now));
-            return true;
-        }
-
-        let duplicate = self
-            .last_ctrl_chord
-            .as_ref()
-            .map(|(code, modifiers, at)| {
-                *code == key.code
-                    && *modifiers == key.modifiers
-                    && now.saturating_duration_since(*at) < Duration::from_millis(260)
-            })
-            .unwrap_or(false);
-
-        self.last_ctrl_chord = Some((key.code, key.modifiers, now));
-        duplicate
-    }
-
     fn resize(&mut self, cols: u16, rows: u16) -> anyhow::Result<()> {
         // Actual PTY sizing is handled in draw() from the active layout.
         // Doing it here causes conflicting resize events and TUI glitches.
         let _ = (cols, rows);
         Ok(())
-    }
-
-    fn should_throttle_ctrl_g(&mut self, key: KeyEvent) -> bool {
-        if key.code != KeyCode::Char('g') || !key.modifiers.contains(KeyModifiers::CONTROL) {
-            return false;
-        }
-
-        let now = Instant::now();
-        let throttled = self
-            .last_ctrl_g_sent_at
-            .map(|at| now.saturating_duration_since(at) < Duration::from_millis(900))
-            .unwrap_or(false);
-
-        if !throttled {
-            self.last_ctrl_g_sent_at = Some(now);
-        }
-
-        throttled
     }
 
     fn drain_shell_output(&mut self) {
@@ -484,6 +444,20 @@ impl App {
         let mut out = Vec::with_capacity(process_len);
         let mut i = 0;
         while i < process_len {
+            if self.shell_control_tail[i..].starts_with(NICU_OSC_PREFIX) {
+                if let Some(relative_end) = self.shell_control_tail[i..process_len]
+                    .iter()
+                    .position(|byte| *byte == NICU_OSC_TERMINATOR)
+                {
+                    let payload_start = i + NICU_OSC_PREFIX.len();
+                    let payload_end = i + relative_end;
+                    let payload = self.shell_control_tail[payload_start..payload_end].to_vec();
+                    self.handle_shell_control_payload(&payload);
+                    i = payload_end + 1;
+                    continue;
+                }
+            }
+
             if i + NICU_PASSTHROUGH_ON.len() <= process_len
                 && self.shell_control_tail[i..].starts_with(NICU_PASSTHROUGH_ON)
             {
@@ -511,35 +485,46 @@ impl App {
         out
     }
 
+    fn handle_shell_control_payload(&mut self, payload: &[u8]) {
+        let Ok(text) = std::str::from_utf8(payload) else {
+            return;
+        };
+
+        if let Some(value) = text.strip_prefix("nicu-llm-status=") {
+            let normalized = value.trim();
+            if !normalized.is_empty() {
+                self.llm_preview = normalized.to_string();
+                self.status = format!("llm: {}", truncate_for_status(normalized, 96));
+            }
+            return;
+        }
+
+        if text == "nicu-passthrough=on" {
+            self.tui_passthrough = true;
+            self.focus = Focus::Terminal;
+            self.status = "TUI直通: ON (sish-config) | Alt+Tで解除".to_string();
+        } else if text == "nicu-passthrough=off" {
+            self.tui_passthrough = false;
+            self.status = "TUI直通: OFF | Alt+Tで再開".to_string();
+        }
+    }
+
     fn handle_key(&mut self, key: KeyEvent) -> anyhow::Result<bool> {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return Ok(false);
         }
 
-        if self.should_swallow_ctrl_chord(key) {
+        if self.should_swallow_repeat(key) {
             return Ok(false);
         }
 
         let auto_tui = self.auto_tui_active();
 
-        if key.code == KeyCode::Char('g')
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-            && !self.effective_passthrough()
-        {
-            self.tui_passthrough = true;
-            self.auto_tui_until = Some(Instant::now() + Duration::from_secs(3));
-            self.status = "TUI直通: ON(auto-launch) | Ctrl+Tで解除".to_string();
-        }
-
-        // Do not steal Ctrl+T while a child TUI is active; forward it natively.
-        if key.code == KeyCode::Char('t')
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-            && !auto_tui
-        {
+        if self.config.bind_matches(&self.config.keybinds.passthrough_toggle, &key) && !auto_tui {
             self.focus = Focus::Terminal;
             self.tui_passthrough = !self.tui_passthrough;
             self.status = if self.tui_passthrough {
-                "TUI直通: ON(manual) | Ctrl+Tで解除".to_string()
+                "TUI直通: ON(manual) | 同じキーで解除".to_string()
             } else {
                 "TUI直通: OFF(manual) | 自動判定は継続".to_string()
             };
@@ -549,32 +534,27 @@ impl App {
         let passthrough_active = self.effective_passthrough();
 
         if passthrough_active {
-            if self.should_throttle_ctrl_g(key) {
-                return Ok(false);
-            }
-
             if let Some(bytes) = self.key_to_pty_bytes(key) {
                 self.shell.send_bytes(&bytes)?;
             }
             return Ok(false);
         }
 
-        if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if self.config.bind_matches(&self.config.keybinds.quit, &key) {
             return Ok(true);
         }
 
-        if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if self.config.bind_matches(&self.config.keybinds.focus_toggle, &key) {
             self.toggle_focus();
             return Ok(false);
         }
 
-        if key.code == KeyCode::F(1) {
-            self.toggle_focus();
-            return Ok(false);
-        }
-
-        if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if self.config.bind_matches(&self.config.keybinds.copy_output, &key) {
             self.copy_terminal_screen();
+            return Ok(false);
+        }
+
+        if self.handle_bound_action(key)? {
             return Ok(false);
         }
 
@@ -592,55 +572,85 @@ impl App {
     }
 
     fn handle_explorer_key(&mut self, key: KeyEvent) -> anyhow::Result<bool> {
-        match key.code {
-            KeyCode::Up => {
-                if self.explorer_selected > 0 {
-                    self.explorer_selected -= 1;
-                }
+        if matches!(key.code, KeyCode::Esc) || matches!(key.code, KeyCode::Char('q')) {
+            self.focus = Focus::Terminal;
+            self.status = "focus: terminal".to_string();
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_up, &key) {
+            self.move_explorer_selection(-1);
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_down, &key) {
+            self.move_explorer_selection(1);
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_page_up, &key) {
+            self.move_explorer_selection(-(self.explorer_page_step() as isize));
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_page_down, &key) {
+            self.move_explorer_selection(self.explorer_page_step() as isize);
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_top, &key) {
+            self.explorer_selected = 0;
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_bottom, &key) {
+            self.explorer_selected = self.explorer_entries.len().saturating_sub(1);
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_parent, &key) {
+            if let Some(parent) = self.explorer_path.parent() {
+                self.explorer_path = parent.to_path_buf();
+                self.refresh_explorer();
+                self.status = format!("explorer: {}", self.explorer_path.display());
             }
-            KeyCode::Down => {
-                if self.explorer_selected + 1 < self.explorer_entries.len() {
-                    self.explorer_selected += 1;
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(parent) = self.explorer_path.parent() {
-                    self.explorer_path = parent.to_path_buf();
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_refresh, &key) {
+            self.refresh_explorer();
+            self.status = "explorer refreshed".to_string();
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_toggle_hidden, &key) {
+            self.show_hidden = !self.show_hidden;
+            self.refresh_explorer();
+            self.status = if self.show_hidden {
+                "show hidden: on".to_string()
+            } else {
+                "show hidden: off".to_string()
+            };
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.explorer_open, &key) {
+            if let Some(entry) = self.explorer_entries.get(self.explorer_selected).cloned() {
+                if entry.is_dir {
+                    self.explorer_path = entry.path.clone();
                     self.refresh_explorer();
-                    self.status = format!("explorer: {}", self.explorer_path.display());
-                }
-            }
-            KeyCode::Char('r') => {
-                self.refresh_explorer();
-                self.status = "explorer refreshed".to_string();
-            }
-            KeyCode::Char('.') => {
-                self.show_hidden = !self.show_hidden;
-                self.refresh_explorer();
-                self.status = if self.show_hidden {
-                    "show hidden: on".to_string()
+                    self.send_cd(&entry.path)?;
+                    self.status = format!("cd {}", entry.path.display());
                 } else {
-                    "show hidden: off".to_string()
-                };
-            }
-            KeyCode::Enter => {
-                if let Some(entry) = self.explorer_entries.get(self.explorer_selected).cloned() {
-                    if entry.is_dir {
-                        self.explorer_path = entry.path.clone();
-                        self.refresh_explorer();
-                        self.send_cd(&entry.path)?;
-                        self.status = format!("cd {}", entry.path.display());
-                    } else {
-                        self.send_open_file(&entry.path)?;
-                        self.status = format!("open {}", entry.path.display());
-                    }
+                    self.send_open_file(&entry.path)?;
+                    self.status = format!("open {}", entry.path.display());
                 }
             }
-            _ => {
-                if let Some(bytes) = self.key_to_pty_bytes(key) {
-                    self.shell.send_bytes(&bytes)?;
-                }
-            }
+            return Ok(false);
+        }
+
+        if let Some(bytes) = self.key_to_pty_bytes(key) {
+            self.shell.send_bytes(&bytes)?;
         }
 
         Ok(false)
@@ -693,6 +703,108 @@ impl App {
         }
     }
 
+    fn should_swallow_repeat(&self, key: KeyEvent) -> bool {
+        if key.kind != KeyEventKind::Repeat {
+            return false;
+        }
+
+        self.config.bind_matches(&self.config.keybinds.quit, &key)
+            || self.config.bind_matches(&self.config.keybinds.focus_toggle, &key)
+            || self.config.bind_matches(&self.config.keybinds.passthrough_toggle, &key)
+            || self.config.bind_matches(&self.config.keybinds.copy_output, &key)
+            || self.config.bind_matches(&self.config.keybinds.explorer_open, &key)
+            || self.config.bind_matches(&self.config.keybinds.explorer_parent, &key)
+            || self.config.bind_matches(&self.config.keybinds.explorer_toggle_hidden, &key)
+    }
+
+    fn handle_bound_action(&mut self, key: KeyEvent) -> anyhow::Result<bool> {
+        let event_name = key_event_name(&key);
+
+        if let Some(shortcut) = self.config.shortcut_by_bind(&event_name).cloned() {
+            self.run_shortcut(shortcut)?;
+            return Ok(true);
+        }
+
+        if let Some(entry) = self.config.macro_by_bind(&event_name).cloned() {
+            self.run_macro(entry)?;
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    fn run_shortcut(&mut self, shortcut: Shortcut) -> anyhow::Result<()> {
+        self.shell.send(&shortcut.expansion)?;
+        if shortcut.execute {
+            self.shell.send("\r")?;
+        }
+        self.focus = Focus::Terminal;
+        self.status = format!("shortcut: {}", shortcut.name);
+        Ok(())
+    }
+
+    fn run_macro(&mut self, entry: MacroEntry) -> anyhow::Result<()> {
+        self.shell.send(&entry.template)?;
+        if entry.execute {
+            self.shell.send("\r")?;
+        }
+        self.focus = Focus::Terminal;
+        self.status = format!("macro: {}", entry.name);
+        Ok(())
+    }
+
+    fn move_explorer_selection(&mut self, delta: isize) {
+        if self.explorer_entries.is_empty() {
+            self.explorer_selected = 0;
+            return;
+        }
+
+        let max = self.explorer_entries.len().saturating_sub(1) as isize;
+        let next = (self.explorer_selected as isize + delta).clamp(0, max);
+        self.explorer_selected = next as usize;
+    }
+
+    fn explorer_page_step(&self) -> usize {
+        (self.parser_rows as usize / 2).clamp(5, 20)
+    }
+
+    fn default_status(&self) -> String {
+        format!(
+            "{}: quit | {}: focus | {}: passthrough | explorer: j/k h/l g G ^u ^d . | q/esc: terminal",
+            primary_bind(&self.config.keybinds.quit),
+            primary_bind(&self.config.keybinds.focus_toggle),
+            primary_bind(&self.config.keybinds.passthrough_toggle)
+        )
+    }
+
+    fn llm_status(&self) -> String {
+        if !self.config.llm.enabled {
+            return "llm: off".to_string();
+        }
+
+        if self.config.llm_ready() {
+            let label = if self.config.llm.model.trim().is_empty() {
+                "default".to_string()
+            } else {
+                self.config.llm.model.clone()
+            };
+            format!("llm: ready ({label})")
+        } else {
+            "llm: endpoint missing".to_string()
+        }
+    }
+
+    fn explorer_title(&self) -> String {
+        if self.llm_preview.is_empty() {
+            return "TUI Explorer [j/k h/l g G ^u ^d .]".to_string();
+        }
+
+        format!(
+            "LLM Assist | {}",
+            truncate_for_status(&self.llm_preview, 34)
+        )
+    }
+
     fn send_cd(&self, path: &Path) -> anyhow::Result<()> {
         let quoted = shell_quote(path);
         self.shell.send(&format!("cd -- {quoted}\r"))
@@ -700,7 +812,9 @@ impl App {
 
     fn send_open_file(&self, path: &Path) -> anyhow::Result<()> {
         let quoted = shell_quote(path);
-        self.shell.send(&format!("less -- {quoted}\r"))
+        self.shell.send(&format!(
+            "if [[ -n \"${{EDITOR:-}}\" ]] && command -v \"${{EDITOR}}\" >/dev/null 2>&1; then \"${{EDITOR}}\" -- {quoted}; elif command -v nvim >/dev/null 2>&1; then nvim -- {quoted}; elif command -v vim >/dev/null 2>&1; then vim -- {quoted}; else less -- {quoted}; fi\r"
+        ))
     }
 
     fn copy_terminal_screen(&mut self) {
@@ -956,6 +1070,27 @@ fn shell_quote(path: &Path) -> String {
     format!("'{escaped}'")
 }
 
+fn primary_bind(bindings: &str) -> String {
+    bindings
+        .split([',', '|'])
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .unwrap_or("unbound")
+        .to_string()
+}
+
+fn truncate_for_status(value: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (count, ch) in value.chars().enumerate() {
+        if count >= max_chars {
+            out.push('…');
+            return out;
+        }
+        out.push(ch);
+    }
+    out
+}
+
 fn try_init_clipboard() -> Option<Clipboard> {
     let has_graphics = std::env::var_os("WAYLAND_DISPLAY").is_some()
         || std::env::var_os("DISPLAY").is_some();
@@ -969,12 +1104,14 @@ fn marker_suffix_len(buf: &[u8]) -> usize {
     let max = NICU_PASSTHROUGH_ON
         .len()
         .max(NICU_PASSTHROUGH_OFF.len())
+        .max(NICU_OSC_PREFIX.len() + 128)
         .saturating_sub(1);
     let limit = max.min(buf.len());
 
     for n in (1..=limit).rev() {
         if NICU_PASSTHROUGH_ON.starts_with(&buf[buf.len() - n..])
             || NICU_PASSTHROUGH_OFF.starts_with(&buf[buf.len() - n..])
+            || NICU_OSC_PREFIX.starts_with(&buf[buf.len() - n..])
         {
             return n;
         }

@@ -55,6 +55,7 @@ static int sish_cfg_llm_enable = 0;
 static char sish_cfg_llm_endpoint[256] = "";
 static char sish_cfg_llm_model[128] = "";
 static int sish_cfg_llm_max_tokens = 2000;
+static int sish_cfg_llm_auto_explain = 0;
 
 static int
 sish_llm_ready(void)
@@ -166,6 +167,7 @@ sish_config_init_once(void)
     const char *model = getenv("SISH_LLM_MODEL");
     if (model && *model) sish_copy_bounded(sish_cfg_llm_model, sizeof(sish_cfg_llm_model), model);
     sish_cfg_llm_max_tokens = sish_env_int("SISH_LLM_MAX_TOKENS", 2000, 1, 200000);
+    sish_cfg_llm_auto_explain = sish_env_int("SISH_LLM_AUTO_EXPLAIN", 0, 0, 1);
 }
 
 /**/
@@ -318,6 +320,14 @@ sish_llm_max_tokens_setting(void)
 {
     sish_config_init_once();
     return sish_cfg_llm_max_tokens;
+}
+
+/**/
+int
+sish_llm_auto_explain_setting(void)
+{
+    sish_config_init_once();
+    return sish_cfg_llm_auto_explain;
 }
 
 /**/

@@ -67,6 +67,7 @@ int sish_llm_enabled_setting(void);
 const char *sish_llm_endpoint_setting(void);
 const char *sish_llm_model_setting(void);
 int sish_llm_max_tokens_setting(void);
+int sish_llm_auto_explain_setting(void);
 
 const char *sish_color_char(void);
 const char *sish_color_cmd(void);

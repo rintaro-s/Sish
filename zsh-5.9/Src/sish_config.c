@@ -63,10 +63,32 @@ sish_cfg_llm_ready(void)
     return sish_cfg_llm_enable && sish_cfg_llm_endpoint[0] != '\0';
 }
 
+static const char *
+sish_cfg_llm_state_label(void)
+{
+    if (!sish_cfg_llm_enable)
+        return sish_lang_is_en() ? "disabled" : "無効";
+    if (!sish_cfg_llm_endpoint[0])
+        return sish_lang_is_en() ? "endpoint missing" : "endpoint未設定";
+    if (!sish_cfg_llm_model[0])
+        return sish_lang_is_en() ? "model default" : "model既定";
+    return sish_lang_is_en() ? "ready" : "準備OK";
+}
+
 static int sish_cfg_gui_enable = 0;
 static char sish_cfg_gui_socket_path[256] = "/tmp/sish-console.sock";
 static int sish_cfg_gui_autostart = 0;
 static int sish_cfg_gui_expression_sync = 1;
+
+static const char *
+sish_cfg_gui_state_label(void)
+{
+    if (!sish_cfg_gui_enable)
+        return sish_lang_is_en() ? "disabled" : "無効";
+    if (!sish_cfg_gui_socket_path[0])
+        return sish_lang_is_en() ? "socket missing" : "socket未設定";
+    return sish_lang_is_en() ? "ready" : "準備OK";
+}
 
 /* Apt2Pacman設定 */
 static int sish_cfg_apt2pacman_enable = 0;
@@ -479,39 +501,37 @@ static void show_config_header(void) {
 
 /* メインメニューを表示 */
 static void show_main_menu(int selected) {
-    const char *menu_items_ja[] = {
-        "1. テーマカラー設定",
-        "2. 口調・パーソナリティ設定",
-        "3. キャラクター設定（言語を含む）",
-        "4. ショートカット管理",
-        "5. 補完機能設定",
-        "6. LLM統合設定（未実装）",
-        "7. エラーメッセージ詳細度",
-        "8. GUI連携設定・表示設定（未実装）",
-        "9. パッケージマネージャ変換（Apt→Pacman）",
-        "R. 設定をリセット",
-        "0. 設定を保存して終了",
-        NULL
-    };
-    const char *menu_items_en[] = {
-        "1. Theme Color",
-        "2. Tone / Personality",
-        "3. Character (includes Language)",
-        "4. Shortcuts",
-        "5. Completion Settings",
-        "6. LLM Integration (Not Implemented)",
-        "7. Error Verbosity",
-        "8. GUI Integration & Display (Not Implemented)",
-        "9. Package Manager Conversion (Apt→Pacman)",
-        "R. Reset Settings",
-        "0. Save & Exit",
-        NULL
-    };
-    const char **menu_items = sish_lang_is_en() ? menu_items_en : menu_items_ja;
+    char menu_items[11][160];
     
     show_config_header();
+
+    if (sish_lang_is_en()) {
+        snprintf(menu_items[0], sizeof(menu_items[0]), "1. Theme Color");
+        snprintf(menu_items[1], sizeof(menu_items[1]), "2. Tone / Personality");
+        snprintf(menu_items[2], sizeof(menu_items[2]), "3. Character (includes Language)");
+        snprintf(menu_items[3], sizeof(menu_items[3]), "4. Shortcuts");
+        snprintf(menu_items[4], sizeof(menu_items[4]), "5. Completion Settings");
+        snprintf(menu_items[5], sizeof(menu_items[5]), "6. LLM Integration [%s]", sish_cfg_llm_state_label());
+        snprintf(menu_items[6], sizeof(menu_items[6]), "7. Error Verbosity");
+        snprintf(menu_items[7], sizeof(menu_items[7]), "8. GUI Integration & Display [%s]", sish_cfg_gui_state_label());
+        snprintf(menu_items[8], sizeof(menu_items[8]), "9. Package Manager Conversion (Apt→Pacman)");
+        snprintf(menu_items[9], sizeof(menu_items[9]), "R. Reset Settings");
+        snprintf(menu_items[10], sizeof(menu_items[10]), "0. Save & Exit");
+    } else {
+        snprintf(menu_items[0], sizeof(menu_items[0]), "1. テーマカラー設定");
+        snprintf(menu_items[1], sizeof(menu_items[1]), "2. 口調・パーソナリティ設定");
+        snprintf(menu_items[2], sizeof(menu_items[2]), "3. キャラクター設定（言語を含む）");
+        snprintf(menu_items[3], sizeof(menu_items[3]), "4. ショートカット管理");
+        snprintf(menu_items[4], sizeof(menu_items[4]), "5. 補完機能設定");
+        snprintf(menu_items[5], sizeof(menu_items[5]), "6. LLM統合設定 [%s]", sish_cfg_llm_state_label());
+        snprintf(menu_items[6], sizeof(menu_items[6]), "7. エラーメッセージ詳細度");
+        snprintf(menu_items[7], sizeof(menu_items[7]), "8. GUI連携設定・表示設定 [%s]", sish_cfg_gui_state_label());
+        snprintf(menu_items[8], sizeof(menu_items[8]), "9. パッケージマネージャ変換（Apt→Pacman）");
+        snprintf(menu_items[9], sizeof(menu_items[9]), "R. 設定をリセット");
+        snprintf(menu_items[10], sizeof(menu_items[10]), "0. 設定を保存して終了");
+    }
     
-    for (int i = 0; menu_items[i]; i++) {
+    for (int i = 0; i < 11; i++) {
         if (i == selected) {
             printf("%s%s ▶ %s %s\n", 
                    SISH_COLOR_BOLD, SISH_CMD_COLOR, 
@@ -524,8 +544,8 @@ static void show_main_menu(int selected) {
     printf("\n%s%s%s\n",
            SISH_HINT_COLOR,
            sish_lang_is_en()
-               ? "Use ↑↓ to select, Enter to confirm, ESC to cancel"
-               : "↑↓キーで選択、Enterで決定、ESCでキャンセル",
+               ? "Use ↑↓ or j/k, g/G to jump, Enter to confirm, ESC/q to cancel"
+               : "↑↓ または j/k、g/G で移動、Enterで決定、ESC/qでキャンセル",
            SISH_COLOR_RESET);
 
     fflush(stdout);
@@ -983,7 +1003,13 @@ static void config_llm(void) {
     for (;;) {
         show_config_header();
          printf("%s%s%s\n\n", SISH_CMD_COLOR,
-             sish_lang_is_en() ? "LLM Integration" : "LLM統合設定",
+            sish_lang_is_en() ? "LLM Integration" : "LLM統合設定",
+            SISH_COLOR_RESET);
+
+         printf("  %s: %s%s%s\n\n",
+             sish_lang_is_en() ? "State" : "状態",
+             SISH_CHAR_COLOR,
+             sish_cfg_llm_state_label(),
              SISH_COLOR_RESET);
 
          printf("  1. %s: %s%s%s\n", sish_lang_is_en() ? "Enable" : "LLM統合", SISH_CHAR_COLOR, sish_cfg_llm_enable ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
@@ -1430,6 +1456,30 @@ sish_show_config_menu(void)
                 }
                 break;
             }
+
+            case 'k':
+                if (selected > 0) {
+                    selected--;
+                    needs_redraw = 1;
+                }
+                break;
+
+            case 'j':
+                if (selected < 10) {
+                    selected++;
+                    needs_redraw = 1;
+                }
+                break;
+
+            case 'g':
+                selected = 0;
+                needs_redraw = 1;
+                break;
+
+            case 'G':
+                selected = 10;
+                needs_redraw = 1;
+                break;
 
             case '\n':
             case '\r':  /* Enter */

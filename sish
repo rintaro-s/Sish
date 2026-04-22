@@ -248,7 +248,8 @@ _sish_live_completion_update() {
 }
 
 if [[ -o interactive && "${SISH_LIVE_COMPLETION_ENABLE:-1}" -eq 1 ]]; then
-    :
+    # 入力行の再描画時に候補を更新
+    zle -N zle-line-pre-redraw _sish_live_completion_update 2>/dev/null || true
 fi
 
 command_not_found_handler() {

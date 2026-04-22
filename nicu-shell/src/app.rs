@@ -12,7 +12,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Terminal;
 use std::fs;
 use std::io::{self, Stdout};
@@ -185,7 +185,19 @@ impl App {
             .split(vertical[1]);
 
         let terminal_area = body[0];
-        let explorer_area = body[1];
+        let right_area = body[1];
+
+        // Split right panel: explorer on top, LLM panel on bottom (only when LLM enabled)
+        let llm_panel_height: u16 = if self.config.llm.enabled { 8 } else { 0 };
+        let right_split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(4),
+                Constraint::Length(llm_panel_height),
+            ])
+            .split(right_area);
+        let explorer_area = right_split[0];
+        let llm_area = right_split[1];
 
         let terminal_cols = terminal_area.width.saturating_sub(2).max(1);
         let terminal_rows = terminal_area.height.saturating_sub(2).max(1);
@@ -313,6 +325,38 @@ impl App {
                 .border_style(explorer_border),
         );
         frame.render_widget(explorer, explorer_area);
+
+        // LLM panel (only when enabled)
+        if self.config.llm.enabled {
+            let llm_text = if self.llm_preview.is_empty() {
+                "(waiting for LLM activity...)".to_string()
+            } else {
+                self.llm_preview.clone()
+            };
+            let llm_color = if llm_text.starts_with("error:") || llm_text.contains("エラー") {
+                Color::LightRed
+            } else if llm_text.starts_with("LLM") || llm_text.contains("解析中") || llm_text.contains("analyzing") {
+                Color::Yellow
+            } else if llm_text.starts_with("(") {
+                Color::DarkGray
+            } else {
+                Color::Rgb(200, 230, 255)
+            };
+            let llm_widget = Paragraph::new(llm_text)
+                .style(Style::default().fg(llm_color).bg(panel_bg))
+                .wrap(Wrap { trim: false })
+                .block(
+                    Block::default()
+                        .style(Style::default().bg(panel_bg))
+                        .borders(Borders::ALL)
+                        .title(Line::from(Span::styled(
+                            "LLM Assist",
+                            Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD),
+                        )))
+                        .border_style(Style::default().fg(Color::Rgb(120, 80, 180))),
+                );
+            frame.render_widget(llm_widget, llm_area);
+        }
 
         let footer_text = self.status.clone();
         let footer = Paragraph::new(footer_text)

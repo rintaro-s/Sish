@@ -56,6 +56,7 @@ static char sish_cfg_llm_endpoint[256] = "";
 static char sish_cfg_llm_model[128] = "";
 static int sish_cfg_llm_max_tokens = 2000;
 static int sish_cfg_llm_auto_explain = 0;
+static char sish_cfg_llm_response_lang[16] = "auto";
 
 static int
 sish_cfg_llm_ready(void)
@@ -73,6 +74,16 @@ sish_cfg_llm_state_label(void)
     if (!sish_cfg_llm_model[0])
         return sish_lang_is_en() ? "model default" : "model既定";
     return sish_lang_is_en() ? "ready" : "準備OK";
+}
+
+static const char *
+sish_cfg_llm_response_lang_label(void)
+{
+    if (!strcmp(sish_cfg_llm_response_lang, "en"))
+        return sish_lang_is_en() ? "English" : "英語";
+    if (!strcmp(sish_cfg_llm_response_lang, "ja"))
+        return sish_lang_is_en() ? "Japanese" : "日本語";
+    return sish_lang_is_en() ? "Follow UI" : "UIに合わせる";
 }
 
 static int sish_cfg_gui_enable = 0;
@@ -455,6 +466,8 @@ static void config_load(void) {
             sish_cfg_llm_max_tokens = v;
         } else if (!strcmp(key, "SISH_LLM_AUTO_EXPLAIN")) {
             sish_cfg_llm_auto_explain = atoi(sval) ? 1 : 0;
+        } else if (!strcmp(key, "SISH_LLM_RESPONSE_LANG")) {
+            copy_string_bounded(sish_cfg_llm_response_lang, sizeof(sish_cfg_llm_response_lang), sval);
         } else if (!strcmp(key, "SISH_GUI_ENABLE")) {
             sish_cfg_gui_enable = atoi(sval) ? 1 : 0;
         } else if (!strcmp(key, "SISH_GUI_SOCKET_PATH")) {
@@ -998,6 +1011,99 @@ static void config_completion(void) {
     }
 }
 
+/* LLM接続テスト */
+static void config_llm_test(void) {
+    show_config_header();
+    printf("%s%s%s\n\n", SISH_CMD_COLOR,
+        sish_lang_is_en() ? "LLM Connection Test" : "LLM接続テスト",
+        SISH_COLOR_RESET);
+
+    if (!sish_cfg_llm_ready()) {
+        printf("%s%s%s\n", SISH_ERROR_COLOR,
+            sish_lang_is_en()
+                ? "LLM is not configured. Set endpoint and enable LLM first."
+                : "LLM が設定されていません。エンドポイントと有効化を先に行ってください。",
+            SISH_COLOR_RESET);
+        printf("\n%s%s%s", SISH_HINT_COLOR,
+            sish_lang_is_en() ? "Press any key to go back." : "何かキーを押すと戻ります。",
+            SISH_COLOR_RESET);
+        fflush(stdout);
+        wait_enter_or_esc();
+        return;
+    }
+
+    /* build URL */
+    char url[512];
+    if (strstr(sish_cfg_llm_endpoint, "/v1") != NULL) {
+        snprintf(url, sizeof(url), "%s/chat/completions", sish_cfg_llm_endpoint);
+    } else {
+        snprintf(url, sizeof(url), "%s/v1/chat/completions", sish_cfg_llm_endpoint);
+    }
+
+    /* build payload */
+    char model[256];
+    if (sish_cfg_llm_model[0]) {
+        snprintf(model, sizeof(model), "%s", sish_cfg_llm_model);
+    } else {
+        snprintf(model, sizeof(model), "default");
+    }
+    char payload[1024];
+    snprintf(payload, sizeof(payload),
+        "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"%s\"}],\"max_tokens\":32}",
+        model,
+        sish_lang_is_en() ? "Reply with just: OK" : "一言だけ答えて: OK");
+
+    /* build curl command */
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd),
+        "curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "
+        "-H 'Content-Type: application/json' -X POST '%s' -d '%s' 2>&1",
+        url, payload);
+
+    printf("%s", sish_lang_is_en() ? "Sending test request..." : "テストリクエストを送信中...");
+    fflush(stdout);
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        printf("\n%s%s%s\n", SISH_ERROR_COLOR,
+            sish_lang_is_en() ? "Failed to run curl." : "curl の実行に失敗しました。",
+            SISH_COLOR_RESET);
+    } else {
+        char result[4096];
+        size_t total = 0;
+        char buf[256];
+        while (fgets(buf, sizeof(buf), fp) && total < sizeof(result) - 1) {
+            size_t n = strlen(buf);
+            if (total + n >= sizeof(result) - 1) n = sizeof(result) - 1 - total;
+            memcpy(result + total, buf, n);
+            total += n;
+        }
+        result[total] = '\0';
+        int rc = pclose(fp);
+        printf("\n");
+        if (rc == 0 && total > 0) {
+            printf("%s%s%s\n", SISH_CHAR_COLOR,
+                sish_lang_is_en() ? "✅ Response received:" : "✅ 応答を受信しました:",
+                SISH_COLOR_RESET);
+            /* print first 400 chars of response */
+            if (total > 400) result[400] = '\0';
+            printf("%s\n", result);
+        } else {
+            printf("%s%s%s\n", SISH_ERROR_COLOR,
+                sish_lang_is_en() ? "❌ Request failed:" : "❌ リクエスト失敗:",
+                SISH_COLOR_RESET);
+            if (total > 0) printf("%s\n", result);
+        }
+    }
+
+    printf("\n%s%s%s", SISH_HINT_COLOR,
+        sish_lang_is_en() ? "Press any key to go back." : "何かキーを押すと戻ります。",
+        SISH_COLOR_RESET);
+    fflush(stdout);
+    enable_raw_mode();
+    wait_enter_or_esc();
+}
+
 /* LLM統合設定 */
 static void config_llm(void) {
     for (;;) {
@@ -1019,10 +1125,12 @@ static void config_llm(void) {
              sish_cfg_llm_model[0] ? sish_cfg_llm_model : (sish_lang_is_en() ? "(not set)" : "(未設定)"), SISH_COLOR_RESET);
          printf("  4. %s: %s%d%s\n", sish_lang_is_en() ? "Max tokens" : "最大トークン", SISH_CHAR_COLOR, sish_cfg_llm_max_tokens, SISH_COLOR_RESET);
          printf("  5. %s: %s%s%s\n", sish_lang_is_en() ? "Auto explain last failure" : "直前失敗の自動解説", SISH_CHAR_COLOR, sish_cfg_llm_auto_explain ? (sish_lang_is_en() ? "Enabled" : "有効") : (sish_lang_is_en() ? "Disabled" : "無効"), SISH_COLOR_RESET);
+         printf("  6. %s: %s%s%s\n", sish_lang_is_en() ? "Response language" : "生成言語", SISH_CHAR_COLOR, sish_cfg_llm_response_lang_label(), SISH_COLOR_RESET);
+         printf("  7. %s\n", sish_lang_is_en() ? "Test connection" : "接続テスト");
         printf("  0. %s\n", sish_lang_is_en() ? "Back" : "戻る");
 
          printf("\n%s%s%s", SISH_HINT_COLOR,
-             sish_lang_is_en() ? "Choose (0-5): " : "変更する項目を選択（0-5）: ",
+             sish_lang_is_en() ? "Choose (0-7): " : "変更する項目を選択（0-7）: ",
              SISH_COLOR_RESET);
         fflush(stdout);
 
@@ -1053,12 +1161,25 @@ static void config_llm(void) {
             }
         } else if (choice == '5') {
             sish_cfg_llm_auto_explain = !sish_cfg_llm_auto_explain;
+        } else if (choice == '6') {
+            if (!strcmp(sish_cfg_llm_response_lang, "auto")) {
+                strcpy(sish_cfg_llm_response_lang, "ja");
+            } else if (!strcmp(sish_cfg_llm_response_lang, "ja")) {
+                strcpy(sish_cfg_llm_response_lang, "en");
+            } else {
+                strcpy(sish_cfg_llm_response_lang, "auto");
+            }
+        } else if (choice == '7') {
+            config_llm_test();
+            continue;
         }
 
-        printf("\n%s✅ %s%s\n", SISH_CHAR_COLOR,
-               sish_lang_is_en() ? "Updated! (Use 'Save & Exit' to persist)" : "変更したよ！（保存は『設定を保存して終了』）",
-               SISH_COLOR_RESET);
-        sleep(1);
+        if (choice != '7') {
+            printf("\n%s✅ %s%s\n", SISH_CHAR_COLOR,
+                   sish_lang_is_en() ? "Updated! (Use 'Save & Exit' to persist)" : "変更したよ！（保存は『設定を保存して終了』）",
+                   SISH_COLOR_RESET);
+            sleep(1);
+        }
     }
 }
 
@@ -1239,10 +1360,11 @@ static void config_reset(void) {
         sish_cfg_live_completion_max_candidates = 5;
 
         sish_cfg_llm_enable = 0;
-        sish_cfg_llm_endpoint[0] = '\0';
-        sish_cfg_llm_model[0] = '\0';
-        sish_cfg_llm_max_tokens = 2000;
-        sish_cfg_llm_auto_explain = 0;
+         sish_cfg_llm_endpoint[0] = '\0';
+         sish_cfg_llm_model[0] = '\0';
+         sish_cfg_llm_max_tokens = 2000;
+         sish_cfg_llm_auto_explain = 0;
+         strcpy(sish_cfg_llm_response_lang, "auto");
 
         sish_cfg_gui_enable = 1;
         strncpy(sish_cfg_gui_socket_path, "/tmp/sish-console.sock", sizeof(sish_cfg_gui_socket_path));
@@ -1307,12 +1429,13 @@ static void config_save(void) {
 
         fprintf(fp, "\n# LLM\n");
         write_export_int(fp, "SISH_LLM_ENABLE", sish_cfg_llm_enable);
-        write_export_string(fp, "SISH_LLM_ENDPOINT", sish_cfg_llm_endpoint);
-        write_export_string(fp, "SISH_LLM_MODEL", sish_cfg_llm_model);
-        write_export_int(fp, "SISH_LLM_MAX_TOKENS", sish_cfg_llm_max_tokens);
-        write_export_int(fp, "SISH_LLM_AUTO_EXPLAIN", sish_cfg_llm_auto_explain);
+         write_export_string(fp, "SISH_LLM_ENDPOINT", sish_cfg_llm_endpoint);
+         write_export_string(fp, "SISH_LLM_MODEL", sish_cfg_llm_model);
+         write_export_int(fp, "SISH_LLM_MAX_TOKENS", sish_cfg_llm_max_tokens);
+         write_export_int(fp, "SISH_LLM_AUTO_EXPLAIN", sish_cfg_llm_auto_explain);
+         write_export_string(fp, "SISH_LLM_RESPONSE_LANG", sish_cfg_llm_response_lang);
 
-        fprintf(fp, "\n# GUI\n");
+         fprintf(fp, "\n# GUI\n");
         write_export_int(fp, "SISH_GUI_ENABLE", sish_cfg_gui_enable);
         write_export_string(fp, "SISH_GUI_SOCKET_PATH", sish_cfg_gui_socket_path);
         write_export_int(fp, "SISH_GUI_AUTOSTART", sish_cfg_gui_autostart);

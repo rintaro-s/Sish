@@ -18,6 +18,7 @@ export SISH_SHOW_HINT=${SISH_SHOW_HINT:-1}
 export SISH_LIVE_COMPLETION_ENABLE=${SISH_LIVE_COMPLETION_ENABLE:-1}
 export SISH_LIVE_COMPLETION_MAX_CANDIDATES=${SISH_LIVE_COMPLETION_MAX_CANDIDATES:-5}
 export SISH_LLM_AUTO_EXPLAIN=${SISH_LLM_AUTO_EXPLAIN:-0}
+export SISH_LLM_RESPONSE_LANG=${SISH_LLM_RESPONSE_LANG:-auto}
 export SISH_APT2PACMAN_ENABLE=${SISH_APT2PACMAN_ENABLE:-0}
 
 # Custom environment variables for shortcuts
@@ -299,14 +300,14 @@ sish_config_cmd() {
     local has_builtin=0
     local rc=0
 
-    [[ -o interactive && -t 0 && -t 1 ]] && has_tty=1
+    [[ -e /dev/tty ]] && has_tty=1
     (( ${+builtins[sish-config]} )) && has_builtin=1
 
     trap '_sish_config_passthrough_off; command stty sane 2>/dev/null || true' EXIT INT TERM HUP QUIT
 
     if (( has_builtin && has_tty )); then
         _sish_config_passthrough_on
-        builtin sish-config "$@"
+        builtin sish-config "$@" </dev/tty >/dev/tty
         rc=$?
         command stty sane 2>/dev/null || true
         return $rc
@@ -341,10 +342,10 @@ _sish_best_command_suggestion() {
         fi
     done
 
-    # 2) Approximate match with edit distance 1 (zsh pattern operator).
-    setopt localoptions extendedglob
+    # 2) Loose fallback without extendedglob parsing.
+    local cmd_lower="${cmd:l}"
     for cand in $pool; do
-        if [[ "$cand" == (#a1)${cmd} ]]; then
+        if [[ "${cand:l}" == *"$cmd_lower"* || "$cmd_lower" == *"${cand:l}"* ]]; then
             REPLY="$cand"
             return 0
         fi
@@ -392,9 +393,17 @@ _sish_resolve_nicu() {
         "${NICU_PATH:-}"
         "${SISH_NICU_PATH:-}"
         "${src_root}/nicu"
+        "${src_root}/nicu-shell/target/release/nicu"
+        "${src_root}/nicu-shell/target/debug/nicu"
         "${SISH_REPO_ROOT}/nicu"
+        "${SISH_REPO_ROOT}/nicu-shell/target/release/nicu"
+        "${SISH_REPO_ROOT}/nicu-shell/target/debug/nicu"
         "$HOME/ドキュメント/github/Sish/nicu"
+        "$HOME/ドキュメント/github/Sish/nicu-shell/target/release/nicu"
+        "$HOME/ドキュメント/github/Sish/nicu-shell/target/debug/nicu"
         "$HOME/Documents/github/Sish/nicu"
+        "$HOME/Documents/github/Sish/nicu-shell/target/release/nicu"
+        "$HOME/Documents/github/Sish/nicu-shell/target/debug/nicu"
     )
 
     local c
@@ -472,9 +481,12 @@ if [[ -f ~/.sish/commands.zsh ]]; then
     source ~/.sish/commands.zsh
 fi
 if [[ -d ~/.sish/commands.d ]]; then
-    for f in ~/.sish/commands.d/*.zsh(N); do
+    typeset -a _sish_command_files
+    _sish_command_files=(~/.sish/commands.d/*.zsh(N-.))
+    for f in "${_sish_command_files[@]}"; do
         source "$f"
     done
+    unset _sish_command_files
 fi
 
 # ========================================

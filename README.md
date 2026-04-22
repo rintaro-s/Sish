@@ -109,6 +109,27 @@ $ sish-config
  ▶ 0. Save & Exit 
 
 ```
+
+In `LLM Integration`, you can configure the endpoint, model, max tokens, auto explanation for failed commands, and the response language. When auto explanation runs, Sish now shows a visible querying state, boxed result, and boxed error output in both the normal terminal flow and inside `nicu`.
+
+#### nicu TUI shell
+
+`nicu` is the keyboard-first TUI workspace for Sish. It runs Sish inside an integrated terminal, adds a file explorer, and surfaces shell-side assist features such as LLM status directly in the UI.
+
+```bash
+# Launch nicu
+./nicu
+```
+
+- **Terminal + Explorer**  
+  Use Sish in the main terminal pane while browsing files in the side explorer.
+- **Keyboard-first navigation**  
+  Use `j` / `k` to move, `h` to go to the parent directory, `l` or `Enter` to open, and `g` / `G` to jump to top or bottom.
+- **Focus and passthrough**  
+  Use `Ctrl+E` to switch focus between terminal and explorer. Use `Ctrl+G` to toggle TUI passthrough when you want keys to go straight to the terminal app.
+- **Config integration**  
+  LLM-related settings changed in `sish-config` are reflected in nicu as well.
+
 #### Full zsh compatibility
 ```bash
 # All zsh commands work
@@ -353,6 +374,27 @@ $ sish-config
  ▶ 0. 設定を保存して終了
 
 ```
+
+`LLM統合設定` では、エンドポイント、モデル、最大トークン数、失敗時の自動解説、生成言語を設定できます。自動解説が動いたときは、通常ターミナルでも `nicu` 内でも、問い合わせ中表示・枠付き結果・枠付きエラーが見えるようになりました。
+
+### nicu TUIシェル
+
+`nicu` は、Sish のためのキーボード中心TUIワークスペースです。Sish を統合ターミナル内で動かしつつ、ファイルエクスプローラや LLM 状態表示を同じ画面で扱えます。
+
+```bash
+# nicu を起動
+./nicu
+```
+
+- **ターミナル + エクスプローラ**  
+  メインのターミナルで Sish を使いながら、横のエクスプローラでファイルを確認できます。
+- **キーボード中心の移動**  
+  `j` / `k` で移動、`h` で親ディレクトリへ、`l` または `Enter` で開く、`g` / `G` で先頭・末尾へ移動できます。
+- **フォーカス切替と直通モード**  
+  `Ctrl+E` でターミナルとエクスプローラのフォーカスを切り替えます。`Ctrl+G` で TUI 直通を切り替えると、キー入力をそのままターミナルアプリへ送れます。
+- **設定連携**  
+  `sish-config` で変更した LLM 関連設定は、`nicu` 側にも反映されます。
+
 ### 完全なzsh互換
 
 ```bash

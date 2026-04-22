@@ -50,6 +50,7 @@ pub struct LlmConfig {
     pub model: String,
     pub max_tokens: usize,
     pub auto_explain: bool,
+    pub response_language: String,
 }
 
 impl Default for Keybinds {
@@ -87,6 +88,7 @@ impl Default for LlmConfig {
             model: String::new(),
             max_tokens: 2000,
             auto_explain: false,
+            response_language: "auto".to_string(),
         }
     }
 }
@@ -336,6 +338,9 @@ impl Config {
         if self.llm.max_tokens == 0 {
             self.llm.max_tokens = defaults.llm.max_tokens;
         }
+        if self.llm.response_language.trim().is_empty() {
+            self.llm.response_language = defaults.llm.response_language;
+        }
 
         let mut shortcut_map = BTreeMap::new();
         for shortcut in defaults.shortcuts {
@@ -375,6 +380,9 @@ impl Config {
         }
         if let Some(value) = env_or_export("SISH_LLM_AUTO_EXPLAIN", &exports) {
             self.llm.auto_explain = parse_bool_like(&value);
+        }
+        if let Some(value) = env_or_export("SISH_LLM_RESPONSE_LANG", &exports) {
+            self.llm.response_language = value;
         }
     }
 

@@ -28,14 +28,14 @@ if [[ "${1:-}" == "--edit" ]]; then
     open_config_file
 fi
 
-if [[ ! -t 0 || ! -t 1 ]]; then
+if [[ ! -e /dev/tty ]]; then
     echo "sish-config: interactive TUI unavailable (no tty)." >&2
     echo "sish-config: use '--edit' or edit $CFG_FILE directly." >&2
     exit 2
 fi
 
 if [[ -x "$SISH_LAUNCHER" ]]; then
-    exec "$SISH_LAUNCHER" -ic 'if (( ${+builtins[sish-config]} )); then builtin sish-config; else print -u2 -- "sish-config builtin is unavailable"; exit 127; fi'
+    exec "$SISH_LAUNCHER" -ic 'if (( ${+builtins[sish-config]} )); then builtin sish-config; else print -u2 -- "sish-config builtin is unavailable"; exit 127; fi' </dev/tty >>/dev/tty
 fi
 
 open_config_file

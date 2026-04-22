@@ -120,7 +120,7 @@ cat > "$DOTDIR/.zshrc" << 'EOFRC'
 # Ensure zsh modules (e.g., zsh/zle) can be loaded even when zsh is not installed system-wide.
 # This is replaced by the launcher with an in-repo module directory when available.
 if [[ -n "${SISH_ZSH_MODULE_DIR:-}" && -d "$SISH_ZSH_MODULE_DIR" ]]; then
-    module_path=("$SISH_ZSH_MODULE_DIR" $module_path)
+    module_path=("$SISH_ZSH_MODULE_DIR" "${module_path[@]}")
 fi
 
 # Set i18n path for the embedded zsh session
@@ -134,7 +134,7 @@ for var in SISH_LANG SISH_TONE SISH_THEME SISH_ERROR_VERBOSITY \
            SISH_LIVE_COMPLETION_ENABLE SISH_LIVE_COMPLETION_MAX_CANDIDATES \
            SISH_COMPLETION_ENABLE SISH_COMPLETION_FUZZY SISH_COMPLETION_MAX_CANDIDATES \
            SISH_COMPLETION_DIR_SIMILARITY SISH_COMPLETION_HISTORY \
-           SISH_LLM_ENABLE SISH_LLM_ENDPOINT SISH_LLM_MODEL SISH_LLM_MAX_TOKENS SISH_LLM_AUTO_EXPLAIN \
+           SISH_LLM_ENABLE SISH_LLM_ENDPOINT SISH_LLM_MODEL SISH_LLM_MAX_TOKENS SISH_LLM_AUTO_EXPLAIN SISH_LLM_RESPONSE_LANG \
            SISH_GUI_ENABLE SISH_GUI_SOCKET_PATH SISH_GUI_AUTOSTART SISH_GUI_EXPRESSION_SYNC \
            SISH_APT2PACMAN_ENABLE; do
     if [[ -n "${(P)var:-}" ]]; then
@@ -176,13 +176,13 @@ else
 fi
 
 # 補完（Tab）
-# Debian環境でのハング対策：compinit を軽量モードで実行
-autoload -Uz compinit 2>/dev/null
-if [[ -f ~/.sish_compdump && $(stat -c %Y ~/.sish_compdump 2>/dev/null || echo 0) -gt $(($(date +%s) - 86400)) ]]; then
-    compinit -C -d ~/.sish_compdump 2>/dev/null || true
-else
-    # 新規または1日以上古い場合のみ更新
-    (timeout 5 compinit -d ~/.sish_compdump >/dev/null 2>&1 &)
+if [[ -o interactive ]]; then
+    autoload -Uz compinit 2>/dev/null
+    () {
+        emulate -L zsh
+        setopt localoptions nonomatch
+        compinit -C -d ~/.sish_compdump 2>/dev/null || true
+    }
 fi
 
 # zsh-hook補完（エラーを抑制）
@@ -192,7 +192,9 @@ autoload -Uz add-zsh-hook 2>/dev/null
 # リアルタイム補完（入力中の候補表示）
 # ========================================
 _sish_live_completion_update() {
-    [[ "${SISH_LIVE_COMPLETION_ENABLE:-1}" -eq 1 ]] || { zle -M ""; return 0; }
+    emulate -L zsh
+    setopt localoptions nonomatch nullglob
+    [[ "${SISH_LIVE_COMPLETION_ENABLE:-1}" -eq 1 ]] || { POSTDISPLAY=""; return 0; }
 
     local buf="$BUFFER"
     local cur=$CURSOR
@@ -200,7 +202,7 @@ _sish_live_completion_update() {
     local word="${left##* }"
 
     if [[ -z "$word" ]]; then
-        zle -M ""
+        POSTDISPLAY=""
         return 0
     fi
 
@@ -219,7 +221,7 @@ _sish_live_completion_update() {
     fi
 
     if (( ${#candidates} == 0 )); then
-        zle -M ""
+        POSTDISPLAY=""
         return 0
     fi
 
@@ -237,374 +239,17 @@ _sish_live_completion_update() {
         fi
     done
 
+    local joined="${(j: :)show}"
     if [[ "${SISH_LANG:-ja}" == "en" ]]; then
-        zle -M "Candidates: ${show[*]}"
+        POSTDISPLAY=$'\nCandidates: '"$joined"
     else
-        zle -M "候補: ${show[*]}"
+        POSTDISPLAY=$'\n候補: '"$joined"
     fi
 }
 
 if [[ -o interactive && "${SISH_LIVE_COMPLETION_ENABLE:-1}" -eq 1 ]]; then
-    # Debian環境ではzleイベントが重いため、条件を厳しくする
-    zle -N zle-line-pre-redraw _sish_live_completion_update 2>/dev/null || true
+    :
 fi
-
-# ========================================
-# LLM 統合（簡易フロント）
-# ========================================
-_sish_nicu_emit() {
-    [[ -n "$*" ]] || return 0
-    printf '\033]9;%s\a' "$*"
-}
-
-_sish_escape_json() {
-    local text="$1"
-    text=${text//\\/\\\\}
-    text=${text//"/\\"}
-    text=${text//$'\n'/\\n}
-    text=${text//$'\r'/}
-    text=${text//$'\t'/\\t}
-    print -r -- "$text"
-}
-
-_sish_classify_failure() {
-    local cmd="$1"
-    local exit_code="$2"
-    local suggestion="$3"
-
-    if [[ -n "$suggestion" ]]; then
-        print -r -- "typo_or_known_fix"
-        return 0
-    fi
-
-    case "$cmd" in
-        cd\ * )
-            print -r -- "directory_navigation"
-            ;;
-        git\ * )
-            print -r -- "git_or_repo"
-            ;;
-        cargo\ *|rustc\ *|make\ *|cmake\ *|npm\ *|pnpm\ *|yarn\ *|bun\ *|go\ *|python\ *|python3\ * )
-            print -r -- "build_or_runtime"
-            ;;
-        sudo\ *|chmod\ *|chown\ * )
-            print -r -- "permission_or_privilege"
-            ;;
-        cat\ *|less\ *|nvim\ *|vim\ *|nano\ * )
-            print -r -- "file_access"
-            ;;
-        * )
-            case "$exit_code" in
-                126)
-                    print -r -- "permission_or_not_executable"
-                    ;;
-                127)
-                    print -r -- "command_not_found"
-                    ;;
-                *)
-                    print -r -- "generic_command_failure"
-                    ;;
-            esac
-            ;;
-    esac
-}
-
-_sish_failure_note() {
-    local kind="$1"
-    local cmd="$2"
-    local suggestion="$3"
-
-    case "$kind" in
-        typo_or_known_fix)
-            if [[ -n "$suggestion" ]]; then
-                print -r -- "Sish already has a likely fix. Prefer the suggested command first."
-            else
-                print -r -- "The command likely failed due to a typo or a known path mismatch."
-            fi
-            ;;
-        directory_navigation)
-            print -r -- "Directory navigation failed. Check whether the target path exists relative to the current directory."
-            ;;
-        git_or_repo)
-            print -r -- "This looks like a Git failure. Check repository state, current branch, remotes, and file paths."
-            ;;
-        build_or_runtime)
-            print -r -- "This looks like a build or runtime failure. Focus on the first concrete error and the referenced file or dependency."
-            ;;
-        permission_or_privilege|permission_or_not_executable)
-            print -r -- "This looks related to permissions, executability, or privileges. Avoid sudo unless you understand why it is needed."
-            ;;
-        file_access)
-            print -r -- "This looks like a missing file, wrong path, or unreadable file issue."
-            ;;
-        command_not_found)
-            print -r -- "The command itself was not found. Check PATH, spelling, aliases, or whether the tool is installed."
-            ;;
-        *)
-            print -r -- "Explain the likely root cause based on the command, exit code, directory, and context."
-            ;;
-    esac
-}
-
-_sish_build_failure_prompt() {
-    local cmd="$1"
-    local exit_code="$2"
-    local pwd="$3"
-    local kind="$4"
-    local suggestion="$5"
-    local note="$6"
-    local last_output="$7"
-
-    local prompt
-    if [[ "${SISH_LANG:-ja}" == "en" ]]; then
-        prompt="You are assisting a keyboard-centric terminal user inside Sish. Analyze the failed command and answer in a strict format.\n\nFormat:\nCAUSE: <one short sentence>\nDETAIL: <two short sentences max>\nNEXT: <up to 3 concrete next commands, one per line, each prefixed with '- ' >\nWARN: <one short caution or empty>\n\nRules:\n- Prefer practical shell commands over abstract advice.\n- If there is a known suggestion, use it as the first NEXT item.\n- Keep everything concise and actionable.\n- Do not use markdown headings.\n\nContext:\nFailure kind: $kind\nCommand: $cmd\nExit code: $exit_code\nDirectory: $pwd\nKnown suggestion: ${suggestion:-none}\nHeuristic note: $note\nRecent output:\n${last_output:-<none>}"
-    else
-        prompt="あなたは Sish 内でキーボード中心ユーザーを補助するシェルアシスタントです。失敗したコマンドを解析して、次の厳密フォーマットで日本語で答えて。\n\n形式:\nCAUSE: <原因を一文>\nDETAIL: <補足を二文以内>\nNEXT: <次の具体的なコマンドを最大3個。各行 '- ' で始める>\nWARN: <注意点を一文。なければ空>\n\nルール:\n- 抽象論より実際に打てるシェルコマンドを優先。\n- 既知の候補があるなら最初の NEXT に使う。\n- 短く、行動可能に。\n- Markdown 見出しは使わない。\n\n文脈:\n失敗種別: $kind\nコマンド: $cmd\n終了コード: $exit_code\nディレクトリ: $pwd\n既知の候補: ${suggestion:-none}\nヒューリスティック補足: $note\n直近出力:\n${last_output:-<none>}"
-    fi
-
-    print -r -- "$prompt"
-}
-
-_sish_store_failure_analysis() {
-    local cmd="$1"
-    local exit_code="$2"
-    local pwd="$3"
-    local analysis="$4"
-    local suggestion="$5"
-
-    local analysis_file="$HOME/.sish_last_llm"
-    {
-        print -r -- "CMD=$cmd"
-        print -r -- "STATUS=$exit_code"
-        print -r -- "PWD=$pwd"
-        print -r -- "SUGGESTION=$suggestion"
-        print -r -- "---"
-        print -r -- "$analysis"
-    } >| "$analysis_file"
-
-    local preview="$analysis"
-    preview=${preview//$'\n'/  }
-    preview=${preview:0:240}
-    local escaped
-    escaped="$(_sish_escape_json "$preview")"
-    _sish_nicu_emit "nicu-llm-status=$escaped"
-
-    local llm_suggestion=""
-    llm_suggestion="$(_sish_extract_first_next_command "$analysis")"
-    if [[ -n "$llm_suggestion" ]]; then
-        SISH_LAST_SUGGESTION="$llm_suggestion"
-        print -r -- "$llm_suggestion" >| "/tmp/sish-last-suggestion-$$" 2>/dev/null || true
-    fi
-}
-
-_sish_extract_first_next_command() {
-    local analysis="$1"
-    local line
-    while IFS= read -r line; do
-        case "$line" in
-            "- "*)
-                print -r -- "${line#- }"
-                return 0
-                ;;
-        esac
-    done <<< "$analysis"
-    return 1
-}
-
-_sish_llm_call() {
-    if [[ -z "$*" ]]; then
-        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
-            echo "Usage: sish-llm <prompt>"
-        else
-            echo "使い方: sish-llm <prompt>"
-        fi
-        return 2
-    fi
-
-    if [[ "${SISH_LLM_ENABLE:-0}" -ne 1 ]]; then
-        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
-            echo "LLM integration is disabled. Enable it in sish-config."
-        else
-            echo "LLM統合が無効です。sish-config で有効にしてください。"
-        fi
-        return 1
-    fi
-
-    if [[ -z "${SISH_LLM_ENDPOINT:-}" ]]; then
-        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
-            echo "SISH_LLM_ENDPOINT is not set."
-        else
-            echo "SISH_LLM_ENDPOINT が設定されていません。"
-        fi
-        return 1
-    fi
-
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "curl が必要です。"
-        return 127
-    fi
-
-    local prompt="$*"
-    local model="${SISH_LLM_MODEL:-default}"
-    local max_tokens="${SISH_LLM_MAX_TOKENS:-2000}"
-    local escaped="$prompt"
-    escaped=${escaped//\\/\\\\}
-    escaped=${escaped//"/\\"}
-    escaped=${escaped//$'\n'/\\n}
-
-    local payload
-    payload="{\"model\": \"$model\", \"messages\": [{\"role\": \"user\", \"content\": \"$escaped\"}], \"max_tokens\": $max_tokens}"
-
-    local url
-    if [[ "${SISH_LLM_ENDPOINT}" == */v1* ]]; then
-        url="${SISH_LLM_ENDPOINT}/chat/completions"
-    else
-        url="${SISH_LLM_ENDPOINT}/v1/chat/completions"
-    fi
-
-    local response
-    response=$(curl --fail --silent --show-error \
-        --connect-timeout 5 --max-time 20 \
-        -H 'Content-Type: application/json' \
-        -X POST "$url" \
-        -d "$payload" 2>/dev/null)
-
-    if [[ -z "$response" ]]; then
-        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
-            echo "No response from LLM."
-        else
-            echo "LLMから応答がありません。"
-        fi
-        return 1
-    fi
-
-    if command -v python3 >/dev/null 2>&1; then
-        python3 - << 'PY' <<< "$response"
-import json,sys
-try:
-    data=json.load(sys.stdin)
-    msg=data.get('choices',[{}])[0].get('message',{}).get('content','')
-    print(msg.strip())
-except Exception:
-    print(sys.stdin.read())
-PY
-    else
-        echo "$response" | sed -n 's/.*"content":"\(.*\)".*/\1/p' | sed 's/\\n/\n/g'
-    fi
-}
-
-sish-llm() {
-    _sish_llm_call "$@"
-}
-
-alias llm='sish-llm'
-
-_sish_llm_explain_last() {
-    local cmd="$SISH_LAST_CMD"
-    local exit_code="$SISH_LAST_STATUS"
-    local pwd="$SISH_LAST_PWD"
-    local suggestion="${SISH_LAST_SUGGESTION:-}"
-    local output_file="${SISH_LAST_OUTPUT_FILE:-}"
-    local last_output=""
-
-    if [[ -z "$cmd" || -z "$exit_code" ]]; then
-        return 1
-    fi
-
-    if [[ -n "$output_file" && -r "$output_file" ]]; then
-        last_output="$(tail -n 20 -- "$output_file" 2>/dev/null || true)"
-    fi
-
-    local kind
-    kind="$(_sish_classify_failure "$cmd" "$exit_code" "$suggestion")"
-    local note
-    note="$(_sish_failure_note "$kind" "$cmd" "$suggestion")"
-    local prompt
-    prompt="$(_sish_build_failure_prompt "$cmd" "$exit_code" "$pwd" "$kind" "$suggestion" "$note" "$last_output")"
-
-    local analysis
-    analysis="$(_sish_llm_call "$prompt")" || return $?
-    print -r -- "$analysis"
-    _sish_store_failure_analysis "$cmd" "$exit_code" "$pwd" "$analysis" "$suggestion"
-}
-
-sish-llm-explain() {
-    _sish_llm_explain_last
-}
-
-_sish_llm_maybe_explain_last() {
-    local exit_code=$?
-    if [[ -z "${SISH_LLM_STARTUP_CHECKED:-}" ]]; then
-        SISH_LLM_STARTUP_CHECKED=1
-        if [[ "${SISH_LLM_AUTO_EXPLAIN:-0}" -eq 1 && -f "$HOME/.sish_last_fail" ]]; then
-            line=$(<"$HOME/.sish_last_fail")
-            rm -f "$HOME/.sish_last_fail"
-
-            last_status="${line%%|*}"
-            rest="${line#*|}"
-            last_pwd="${rest%%|*}"
-            last_cmd="${rest#*|}"
-
-            SISH_LAST_STATUS="$last_status"
-            SISH_LAST_PWD="$last_pwd"
-            SISH_LAST_CMD="$last_cmd"
-            SISH_LAST_OUTPUT_FILE="$HOME/.sish_last_output"
-            _sish_llm_explain_last
-        fi
-    fi
-
-    _sish_llm_capture_end
-    local cmd="$SISH_LAST_CMD"
-
-    if [[ -z "$cmd" ]]; then
-        return 0
-    fi
-
-    case "$cmd" in
-        sish-llm*|llm*|sish-llm-explain* )
-            return 0
-            ;;
-    esac
-
-    if (( exit_code != 0 )); then
-        SISH_LAST_STATUS=$exit_code
-        SISH_LAST_PWD="$PWD"
-
-        local fail_file="$HOME/.sish_last_fail"
-        print -r -- "$exit_code|$PWD|$cmd" > "$fail_file"
-
-        if [[ "${SISH_LLM_AUTO_EXPLAIN:-0}" -eq 1 ]]; then
-            _sish_llm_explain_last
-        fi
-    fi
-}
-
-_sish_llm_capture_preexec() {
-    SISH_LAST_SUGGESTION=""
-    SISH_LAST_CMD="$1"
-    SISH_LAST_OUTPUT_FILE="$HOME/.sish_last_output"
-    local -a words
-    words=( ${(z)1} )
-    if (( ${#words} >= 2 )); then
-        print -rl -- "${words[@]:1}" >| "/tmp/sish-last-args-$$" 2>/dev/null || true
-    else
-        : >| "/tmp/sish-last-args-$$" 2>/dev/null || true
-    fi
-    _sish_llm_capture_begin
-    _sish_nicu_emit "nicu-llm-status=running: $(_sish_escape_json "$1")"
-}
-
-_sish_llm_capture_begin() {
-    [[ -n "${SISH_LAST_OUTPUT_FILE:-}" ]] || return 0
-    [[ -n "${SISH_TTY_OUT_FD:-}" ]] || return 0
-    : >| "$SISH_LAST_OUTPUT_FILE"
-    exec > >(tee -a "$SISH_LAST_OUTPUT_FILE" >&${SISH_TTY_OUT_FD}) 2> >(tee -a "$SISH_LAST_OUTPUT_FILE" >&${SISH_TTY_ERR_FD})
-}
-
-_sish_llm_capture_end() {
-    [[ -n "${SISH_TTY_OUT_FD:-}" ]] || return 0
-    exec >&${SISH_TTY_OUT_FD} 2>&${SISH_TTY_ERR_FD}
-}
 
 command_not_found_handler() {
     local missing="$1"
@@ -659,17 +304,8 @@ command_not_found_handler() {
             print -r -- "Sish：\"$missing\" は見つからなかったよ…"
         fi
     fi
-
     return 127
 }
-
-if [[ -o interactive ]]; then
-    exec {SISH_TTY_OUT_FD}>&1
-    exec {SISH_TTY_ERR_FD}>&2
-    autoload -Uz add-zsh-hook 2>/dev/null
-    add-zsh-hook preexec _sish_llm_capture_preexec 2>/dev/null || true
-    add-zsh-hook precmd _sish_llm_maybe_explain_last 2>/dev/null || true
-fi
 
 # cd補正フック: ディレクトリが見つからないときに補正候補を表示
 cd_with_correction() {
@@ -791,27 +427,27 @@ apt() {
     
     case "$1" in
         update|upgrade)
-            echo "🔄 Sish: Converting 'apt $1' → 'pacman -Syu'"
+            echo " Sish: Converting 'apt $1' → 'pacman -Syu'"
             shift
             pacman -Syu "$@"
             ;;
         install)
             shift
-            echo "📦 Sish: Converting 'apt install' → 'pacman -S'"
+            echo " Sish: Converting 'apt install' → 'pacman -S'"
             pacman -S "$@"
             ;;
         remove|uninstall)
             shift
-            echo "🗑️  Sish: Converting 'apt remove' → 'pacman -R'"
+            echo " Sish: Converting 'apt remove' → 'pacman -R'"
             pacman -R "$@"
             ;;
         search)
             shift
-            echo "🔍 Sish: Converting 'apt search' → 'pacman -Ss'"
+            echo " Sish: Converting 'apt search' → 'pacman -Ss'"
             pacman -Ss "$@"
             ;;
         *)
-            echo "⚠️  Sish: Unknown apt command '$1', running as-is"
+            echo " Sish: Unknown apt command '$1', running as-is"
             command apt "$@"
             ;;
     esac
@@ -823,27 +459,27 @@ sudo() {
         shift
         case "$1" in
             update|upgrade)
-                echo "🔄 Sish: Converting 'sudo apt $1' → 'sudo pacman -Syu'"
+                echo " Sish: Converting 'sudo apt $1' → 'sudo pacman -Syu'"
                 shift
                 command sudo pacman -Syu "$@"
                 ;;
             install)
                 shift
-                echo "📦 Sish: Converting 'sudo apt install' → 'sudo pacman -S'"
+                echo " Sish: Converting 'sudo apt install' → 'sudo pacman -S'"
                 command sudo pacman -S "$@"
                 ;;
             remove|uninstall)
                 shift
-                echo "🗑️  Sish: Converting 'sudo apt remove' → 'sudo pacman -R'"
+                echo " Sish: Converting 'sudo apt remove' → 'sudo pacman -R'"
                 command sudo pacman -R "$@"
                 ;;
             search)
                 shift
-                echo "🔍 Sish: Converting 'sudo apt search' → 'pacman -Ss'"
+                echo " Sish: Converting 'sudo apt search' → 'pacman -Ss'"
                 pacman -Ss "$@"
                 ;;
             *)
-                echo "⚠️  Sish: Unknown apt command '$1', running as-is"
+                echo " Sish: Unknown apt command '$1', running as-is"
                 command sudo apt "$@"
                 ;;
         esac
@@ -1084,9 +720,428 @@ if [[ -f ~/.sish/commands.zsh ]]; then
     source ~/.sish/commands.zsh
 fi
 if [[ -d ~/.sish/commands.d ]]; then
-    for f in ~/.sish/commands.d/*.zsh(N); do
+    typeset -a _sish_command_files
+    _sish_command_files=(~/.sish/commands.d/*.zsh(N-.))
+    for f in "${_sish_command_files[@]}"; do
         source "$f"
     done
+    unset _sish_command_files
+fi
+
+# ========================================
+# LLM 統合
+# ========================================
+_sish_nicu_emit() {
+    [[ -n "$*" ]] || return 0
+    printf '\033]9;%s\a' "$*"
+}
+
+_sish_escape_json() {
+    local text="$1"
+    text=${text//\\/\\\\}
+    text=${text//"/\\"}
+    text=${text//$'\n'/\\n}
+    text=${text//$'\r'/}
+    text=${text//$'\t'/\\t}
+    print -r -- "$text"
+}
+
+_sish_llm_response_lang() {
+    local value="${SISH_LLM_RESPONSE_LANG:-auto}"
+    value="${value:l}"
+    case "$value" in
+        ""|auto|follow|follow-ui|system)
+            print -r -- "${SISH_LANG:-ja}"
+            ;;
+        en|english)
+            print -r -- "en"
+            ;;
+        ja|jp|japanese)
+            print -r -- "ja"
+            ;;
+        *)
+            print -r -- "${SISH_LANG:-ja}"
+            ;;
+    esac
+}
+
+_sish_llm_emit_status() {
+    [[ -n "$*" ]] || return 0
+    _sish_nicu_emit "nicu-llm-status=$(_sish_escape_json "$*")"
+}
+
+_sish_llm_print_box() {
+    local title="$1"
+    local body="$2"
+    local term_width="${COLUMNS:-100}"
+    local inner_width=$(( term_width - 4 ))
+    [[ $inner_width -gt 96 ]] && inner_width=96
+    [[ $inner_width -lt 24 ]] && inner_width=24
+    local border="+$(printf '%0.s-' {1..$((inner_width + 2))})+"
+    local title_line="${title[1,$inner_width]}"
+    printf '\n'
+    printf '%s\n' "$border"
+    printf '| %-*s |\n' "$inner_width" "$title_line"
+    printf '%s\n' "$border"
+    local _box_line
+    local -a _box_lines
+    _box_lines=("${(@f)body}")
+    for _box_line in "${_box_lines[@]}"; do
+        while [[ ${#_box_line} -gt $inner_width ]]; do
+            printf '| %-*s |\n' "$inner_width" "${_box_line[1,$inner_width]}"
+            _box_line="${_box_line[$((inner_width+1)),-1]}"
+        done
+        printf '| %-*s |\n' "$inner_width" "$_box_line"
+    done
+    printf '%s\n' "$border"
+}
+
+_sish_llm_collect_output_context() {
+    local output_file="$1"
+    local token_budget="${SISH_LLM_CONTEXT_TOKENS:-1200}"
+    [[ -n "$output_file" && -r "$output_file" ]] || return 0
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$output_file" "$token_budget" <<'PY'
+import pathlib,re,sys
+path=pathlib.Path(sys.argv[1])
+try: budget=max(50,int(sys.argv[2]))
+except: budget=1200
+text=path.read_text(errors='replace')
+text=text.replace('\r','\n')
+text=re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]','',text)
+text=re.sub(r'\x1b\][^\x07]*(?:\x07|\x1b\\)','',text)
+text=text.replace('\x00','')
+tokens=text.split()
+if not tokens: sys.exit(0)
+if len(tokens)<=budget: print(' '.join(tokens))
+else:
+    omitted=len(tokens)-budget
+    print(f'[trimmed: omitted {omitted} tokens, showing last {budget}]')
+    print(' '.join(tokens[-budget:]))
+PY
+    else
+        tail -c 12000 -- "$output_file" 2>/dev/null || true
+    fi
+}
+
+_sish_llm_preview_text() {
+    local analysis="$1"
+    local line
+    while IFS= read -r line; do
+        case "$line" in
+            CAUSE:*|DETAIL:*|WARN:*)
+                print -r -- "${line#*: }"
+                return 0
+                ;;
+        esac
+    done <<< "$analysis"
+    print -r -- "${analysis%%$'\n'*}"
+}
+
+_sish_llm_querying_text() {
+    if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+        print -r -- "LLM is analyzing the last failure..."
+    else
+        print -r -- "LLM が直前の失敗を解析中..."
+    fi
+}
+
+_sish_llm_result_title() {
+    if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+        print -r -- "LLM Failure Analysis"
+    else
+        print -r -- "LLM 失敗解析"
+    fi
+}
+
+_sish_llm_error_title() {
+    if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+        print -r -- "LLM Request Error"
+    else
+        print -r -- "LLM 問い合わせエラー"
+    fi
+}
+
+_sish_classify_failure() {
+    local cmd="$1" exit_code="$2" suggestion="$3"
+    if [[ -n "$suggestion" ]]; then print -r -- "typo_or_known_fix"; return 0; fi
+    case "$cmd" in
+        cd\ *)    print -r -- "directory_navigation" ;;
+        git\ *)   print -r -- "git_or_repo" ;;
+        cargo\ *|rustc\ *|make\ *|cmake\ *|npm\ *|pnpm\ *|yarn\ *|bun\ *|go\ *|python\ *|python3\ *)
+                  print -r -- "build_or_runtime" ;;
+        sudo\ *|chmod\ *|chown\ *) print -r -- "permission_or_privilege" ;;
+        cat\ *|less\ *|nvim\ *|vim\ *|nano\ *) print -r -- "file_access" ;;
+        *)
+            case "$exit_code" in
+                126) print -r -- "permission_or_not_executable" ;;
+                127) print -r -- "command_not_found" ;;
+                *)   print -r -- "generic_command_failure" ;;
+            esac ;;
+    esac
+}
+
+_sish_failure_note() {
+    local kind="$1" cmd="$2" suggestion="$3"
+    case "$kind" in
+        typo_or_known_fix)         print -r -- "Sish already has a likely fix. Prefer the suggested command first." ;;
+        directory_navigation)      print -r -- "Directory navigation failed. Check whether the target path exists." ;;
+        git_or_repo)               print -r -- "Git failure. Check repository state, branch, remotes, and file paths." ;;
+        build_or_runtime)          print -r -- "Build or runtime failure. Focus on the first concrete error." ;;
+        permission_or_privilege|permission_or_not_executable)
+                                   print -r -- "Permissions, executability, or privileges issue." ;;
+        file_access)               print -r -- "Missing file, wrong path, or unreadable file." ;;
+        command_not_found)         print -r -- "Command not found. Check PATH, spelling, or installation." ;;
+        *)                         print -r -- "Explain the likely root cause based on command, exit code, and directory." ;;
+    esac
+}
+
+_sish_build_failure_prompt() {
+    local cmd="$1" exit_code="$2" pwd="$3" kind="$4" suggestion="$5" note="$6" last_output="$7"
+    local prompt
+    if [[ "$(_sish_llm_response_lang)" == "en" ]]; then
+        prompt="You are assisting a terminal user inside Sish. Analyze the failed command. Answer in English.\n\nFormat:\nCAUSE: <one short sentence>\nDETAIL: <two short sentences max>\nNEXT: <up to 3 concrete next commands, one per line, prefixed with '- '>\nWARN: <one short caution or empty>\n\nContext:\nKind: $kind\nCommand: $cmd\nExit code: $exit_code\nDirectory: $pwd\nSuggestion: ${suggestion:-none}\nNote: $note\nOutput:\n${last_output:-<none>}"
+    else
+        prompt="あなたは Sish 内のシェルアシスタントです。失敗したコマンドを解析して日本語で答えて。\n\n形式:\nCAUSE: <原因を一文>\nDETAIL: <補足を二文以内>\nNEXT: <次のコマンドを最大3個。各行 '- ' で始める>\nWARN: <注意点を一文。なければ空>\n\n文脈:\n種別: $kind\nコマンド: $cmd\n終了コード: $exit_code\nディレクトリ: $pwd\n候補: ${suggestion:-none}\n補足: $note\n出力:\n${last_output:-<none>}"
+    fi
+    print -r -- "$prompt"
+}
+
+_sish_extract_first_next_command() {
+    local analysis="$1" line
+    while IFS= read -r line; do
+        case "$line" in
+            "- "*) print -r -- "${line#- }"; return 0 ;;
+        esac
+    done <<< "$analysis"
+    return 1
+}
+
+_sish_store_failure_analysis() {
+    local cmd="$1" exit_code="$2" pwd="$3" analysis="$4" suggestion="$5"
+    local analysis_file="$HOME/.sish_last_llm"
+    { print -r -- "CMD=$cmd"; print -r -- "STATUS=$exit_code"; print -r -- "PWD=$pwd"
+      print -r -- "SUGGESTION=$suggestion"; print -r -- "---"; print -r -- "$analysis"
+    } >| "$analysis_file"
+    local preview="$(_sish_llm_preview_text "$analysis")"
+    preview=${preview//$'\n'/  }; preview=${preview:0:240}
+    _sish_nicu_emit "nicu-llm-status=$(_sish_escape_json "$preview")"
+    local llm_suggestion=""
+    llm_suggestion="$(_sish_extract_first_next_command "$analysis")"
+    if [[ -n "$llm_suggestion" ]]; then
+        SISH_LAST_SUGGESTION="$llm_suggestion"
+        print -r -- "$llm_suggestion" >| "/tmp/sish-last-suggestion-$$" 2>/dev/null || true
+    fi
+}
+
+_sish_llm_call() {
+    SISH_LAST_LLM_ERROR=""
+    if [[ -z "$*" ]]; then
+        SISH_LAST_LLM_ERROR="Usage: sish-llm <prompt>"; echo "$SISH_LAST_LLM_ERROR"; return 2
+    fi
+    if [[ "${SISH_LLM_ENABLE:-0}" -ne 1 ]]; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            SISH_LAST_LLM_ERROR="LLM integration is disabled. Enable it in sish-config."
+        else
+            SISH_LAST_LLM_ERROR="LLM統合が無効です。sish-config で有効にしてください。"
+        fi
+        echo "$SISH_LAST_LLM_ERROR"; return 1
+    fi
+    if [[ -z "${SISH_LLM_ENDPOINT:-}" ]]; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            SISH_LAST_LLM_ERROR="SISH_LLM_ENDPOINT is not set."
+        else
+            SISH_LAST_LLM_ERROR="SISH_LLM_ENDPOINT が設定されていません。"
+        fi
+        echo "$SISH_LAST_LLM_ERROR"; return 1
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            SISH_LAST_LLM_ERROR="curl is required."
+        else
+            SISH_LAST_LLM_ERROR="curl が必要です。"
+        fi
+        echo "$SISH_LAST_LLM_ERROR"; return 127
+    fi
+    local prompt="$*" model="${SISH_LLM_MODEL:-default}" max_tokens="${SISH_LLM_MAX_TOKENS:-2000}"
+    local escaped="$prompt"
+    escaped=${escaped//\\/\\\\}
+    escaped=${escaped//"/\\"}
+    escaped=${escaped//$'\n'/\\n}
+    local payload="{\"model\": \"$model\", \"messages\": [{\"role\": \"user\", \"content\": \"$escaped\"}], \"max_tokens\": $max_tokens}"
+    local url
+    if [[ "${SISH_LLM_ENDPOINT}" == */v1* ]]; then
+        url="${SISH_LLM_ENDPOINT}/chat/completions"
+    else
+        url="${SISH_LLM_ENDPOINT}/v1/chat/completions"
+    fi
+    local response curl_status
+    response=$(curl --fail --silent --show-error \
+        --connect-timeout 5 --max-time 20 \
+        -H 'Content-Type: application/json' \
+        -X POST "$url" -d "$payload" 2>&1)
+    curl_status=$?
+    if (( curl_status != 0 )); then
+        SISH_LAST_LLM_ERROR="${response:-LLM request failed}"
+        echo "$SISH_LAST_LLM_ERROR"; return 1
+    fi
+    if [[ -z "$response" ]]; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            SISH_LAST_LLM_ERROR="No response from LLM."
+        else
+            SISH_LAST_LLM_ERROR="LLMから応答がありません。"
+        fi
+        echo "$SISH_LAST_LLM_ERROR"; return 1
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import json,sys
+raw=sys.stdin.read()
+try:
+    data=json.loads(raw)
+    msg=data.get("choices",[{}])[0].get("message",{}).get("content","")
+    print(msg.strip())
+except Exception:
+    print(raw)' <<< "$response"
+    else
+        echo "$response" | sed -n 's/.*"content":"\(.*\)".*/\1/p' | sed 's/\\n/\n/g'
+    fi
+}
+
+sish-llm() { _sish_llm_call "$@"; }
+alias llm='sish-llm'
+
+_sish_llm_explain_last() {
+    local cmd="$SISH_LAST_CMD" exit_code="$SISH_LAST_STATUS" pwd="$SISH_LAST_PWD"
+    local suggestion="${SISH_LAST_SUGGESTION:-}" output_file="${SISH_LAST_OUTPUT_FILE:-}" last_output=""
+    if [[ -z "$cmd" || -z "$exit_code" ]]; then return 1; fi
+    if [[ -n "$output_file" && -r "$output_file" ]]; then
+        last_output="$(_sish_llm_collect_output_context "$output_file")"
+    fi
+    local kind note prompt query_text
+    kind="$(_sish_classify_failure "$cmd" "$exit_code" "$suggestion")"
+    note="$(_sish_failure_note "$kind" "$cmd" "$suggestion")"
+    prompt="$(_sish_build_failure_prompt "$cmd" "$exit_code" "$pwd" "$kind" "$suggestion" "$note" "$last_output")"
+    query_text="$(_sish_llm_querying_text)"
+    _sish_llm_emit_status "$query_text"
+    _sish_llm_print_box "$query_text" $'cmd: '"$cmd"$'\nstatus: '"$exit_code"$'\npwd: '"$pwd"
+    local analysis
+    analysis="$(_sish_llm_call "$prompt")"
+    local llm_rc=$?
+    if (( llm_rc != 0 )); then
+        local error_text="${analysis:-${SISH_LAST_LLM_ERROR:-unknown llm error}}"
+        _sish_llm_emit_status "error: ${error_text}"
+        _sish_llm_print_box "$(_sish_llm_error_title)" "$error_text"
+        return $llm_rc
+    fi
+    _sish_store_failure_analysis "$cmd" "$exit_code" "$pwd" "$analysis" "$suggestion"
+    _sish_llm_print_box "$(_sish_llm_result_title)" "$analysis"
+}
+
+sish-llm-explain() { _sish_llm_explain_last; }
+
+_sish_llm_handle_failure() {
+    local exit_code="$1" cmd="${2:-}"
+    if [[ -z "$cmd" ]]; then cmd="${SISH_LAST_CMD:-}"; fi
+    if [[ -z "$cmd" ]]; then return 0; fi
+    case "$cmd" in sish-llm*|llm*|sish-llm-explain*|what\?*) return 0 ;; esac
+    SISH_LAST_STATUS=$exit_code
+    SISH_LAST_PWD="$PWD"
+    print -r -- "$exit_code|$PWD|$cmd" >| "$HOME/.sish_last_fail"
+    if [[ "${SISH_LLM_AUTO_EXPLAIN:-0}" -eq 1 ]]; then
+        SISH_LAST_FAILURE_HANDLED=1
+        ( _sish_llm_explain_last ) </dev/tty >/dev/tty 2>/dev/tty &
+        disown 2>/dev/null || true
+    else
+        SISH_LAST_FAILURE_HANDLED=0
+    fi
+}
+
+# TRAPZERR: exit code != 0 のときだけ呼ばれる。$? がまだ生きている
+TRAPZERR() {
+    local exit_code=$?
+    [[ -o interactive ]] || return $exit_code
+    [[ -z "${SISH_LAST_CMD:-}" ]] && return $exit_code
+    if [[ "${SISH_LAST_FAILURE_HANDLED:-0}" -ne 1 ]]; then
+        _sish_llm_handle_failure "$exit_code"
+    fi
+    return $exit_code
+}
+
+_sish_llm_maybe_explain_last() {
+    if [[ -z "${SISH_LLM_STARTUP_CHECKED:-}" ]]; then
+        SISH_LLM_STARTUP_CHECKED=1
+        if [[ "${SISH_LLM_AUTO_EXPLAIN:-0}" -eq 1 && -f "$HOME/.sish_last_fail" ]]; then
+            local _sl_line _sl_status _sl_rest _sl_pwd _sl_cmd
+            _sl_line=$(<"$HOME/.sish_last_fail")
+            rm -f "$HOME/.sish_last_fail"
+            _sl_status="${_sl_line%%|*}"
+            _sl_rest="${_sl_line#*|}"
+            _sl_pwd="${_sl_rest%%|*}"
+            _sl_cmd="${_sl_rest#*|}"
+            ( SISH_LAST_STATUS="$_sl_status"; SISH_LAST_PWD="$_sl_pwd"
+              SISH_LAST_CMD="$_sl_cmd"; SISH_LAST_OUTPUT_FILE="$HOME/.sish_last_output"
+              _sish_llm_explain_last ) </dev/tty >/dev/tty 2>/dev/tty &
+            disown 2>/dev/null || true
+        fi
+    fi
+    SISH_LAST_FAILURE_HANDLED=0
+}
+
+_sish_llm_capture_preexec() {
+    SISH_LAST_SUGGESTION=""
+    SISH_LAST_CMD="$1"
+    SISH_LAST_FAILURE_HANDLED=0
+    SISH_LAST_OUTPUT_FILE="$HOME/.sish_last_output"
+    local -a words
+    words=( ${(z)1} )
+    if (( ${#words} >= 2 )); then
+        print -rl -- "${words[@]:1}" >| "/tmp/sish-last-args-$$" 2>/dev/null || true
+    else
+        : >| "/tmp/sish-last-args-$$" 2>/dev/null || true
+    fi
+}
+
+# what? - 直前の失敗をその場で LLM に聞く
+what\?() {
+    if [[ "${SISH_LLM_ENABLE:-0}" -ne 1 ]]; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            print -r -- "LLM is disabled. Enable it in sish-config."
+        else
+            print -r -- "LLM が無効です。sish-config で有効にしてください。"
+        fi
+        return 1
+    fi
+    if [[ -z "${SISH_LAST_CMD:-}" && ! -f "$HOME/.sish_last_fail" ]]; then
+        if [[ "${SISH_LANG:-ja}" == "en" ]]; then
+            print -r -- "No recent failure to explain."
+        else
+            print -r -- "直近の失敗がありません。"
+        fi
+        return 1
+    fi
+    if [[ -f "$HOME/.sish_last_fail" && -z "${SISH_LAST_CMD:-}" ]]; then
+        local _line _s _r _p _c
+        _line=$(<"$HOME/.sish_last_fail")
+        _s="${_line%%|*}"; _r="${_line#*|}"; _p="${_r%%|*}"; _c="${_r#*|}"
+        SISH_LAST_STATUS="$_s"; SISH_LAST_PWD="$_p"; SISH_LAST_CMD="$_c"
+        SISH_LAST_OUTPUT_FILE="$HOME/.sish_last_output"
+    fi
+    _sish_llm_explain_last
+}
+
+if [[ -o interactive ]]; then
+    autoload -Uz add-zsh-hook 2>/dev/null
+    typeset -ga preexec_functions precmd_functions
+    if (( ${#preexec_functions[@]} )); then
+        preexec_functions=("${(@)preexec_functions:#_sish_llm_capture_preexec}")
+    fi
+    if (( ${#precmd_functions[@]} )); then
+        precmd_functions=("${(@)precmd_functions:#_sish_llm_maybe_explain_last}")
+    fi
+    preexec_functions+=(_sish_llm_capture_preexec)
+    precmd_functions+=(_sish_llm_maybe_explain_last)
+    add-zsh-hook preexec _sish_llm_capture_preexec 2>/dev/null || true
+    add-zsh-hook precmd _sish_llm_maybe_explain_last 2>/dev/null || true
 fi
 
 EOFRC
@@ -1106,12 +1161,24 @@ if [[ -f "$HOME/.sishrc" ]]; then
 fi
 
 cat >> "$DOTDIR/.zshrc" << 'EOFRC_OVERRIDES'
-# Re-apply environment overrides after config loads
-for var in "${(@k)sish_env_overrides}"; do
-    # Skip readonly zsh variables
-    [[ "$var" == "status" ]] && continue
-    export "$var=${sish_env_overrides[$var]}" 2>/dev/null || true
-done
+ # Re-apply environment overrides after config loads
+ for var in "${(@k)sish_env_overrides}"; do
+     # Skip readonly zsh variables
+     [[ "$var" == "status" ]] && continue
+     export "$var=${sish_env_overrides[$var]}" 2>/dev/null || true
+ done
+
+ if [[ -o interactive ]]; then
+     typeset -ga preexec_functions precmd_functions
+     if (( ${#preexec_functions[@]} )); then
+         preexec_functions=("${(@)preexec_functions:#_sish_llm_capture_preexec}")
+     fi
+     if (( ${#precmd_functions[@]} )); then
+         precmd_functions=("${(@)precmd_functions:#_sish_llm_maybe_explain_last}")
+     fi
+     preexec_functions+=(_sish_llm_capture_preexec)
+     precmd_functions+=(_sish_llm_maybe_explain_last)
+ fi
 EOFRC_OVERRIDES
 
 export ZDOTDIR="$DOTDIR"

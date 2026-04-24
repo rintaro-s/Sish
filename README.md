@@ -3,6 +3,8 @@
 
 **No more boring 'black screens'—meet the shell environment with a cute little sister personality.**
 
+Sish is a zsh-compatible shell experience with typo recovery, friendly explanations, an integrated `nicu` TUI workspace, and configurable LLM assistance for failed commands.
+
 > *Translated by GPT-4.1. Please refer to the original Japanese text above for reference.*
 
 > *Most of the project has been translated, but there may still be some mistakes or untranslated parts.*
@@ -23,12 +25,17 @@ cd Sish
 # First time only (builds Sish zsh locally)
 ./setup.sh
 
-# Method 1: Startup script
+# Method 1: Start the shell itself
 ./sish
 
-# Method 2: nicu TUI shell
+# Method 2: Start nicu workspace (terminal + explorer + LLM Assist)
 ./nicu
 ```
+
+- **`./sish`**
+  Use the shell directly with Sish's typo recovery, personality modes, and friendly command help.
+- **`./nicu`**
+  Open the keyboard-first TUI workspace that embeds Sish, adds a file explorer, and shows LLM activity in the UI.
 
 #### Language Configuration
 
@@ -55,6 +62,35 @@ See [docs/LANGUAGE.md](docs/LANGUAGE.md) for details.
 ---
 
 ### What Sish Can Do
+
+#### nicu workspace
+
+`nicu` is the keyboard-first TUI workspace for Sish. It runs Sish inside an integrated terminal, adds a file explorer, and surfaces shell-side assist features such as LLM status directly in the UI.
+
+```bash
+# Launch nicu
+./nicu
+```
+
+- **Terminal + Explorer**  
+  Use Sish in the main terminal pane while browsing files in the side explorer.
+- **LLM Assist panel**  
+  See the current LLM querying state, explanation results, and error states without leaving the workspace.
+- **Keyboard-first navigation**  
+  Use `j` / `k` to move, `h` to go to the parent directory, `l` or `Enter` to open, and `g` / `G` to jump to top or bottom.
+- **Focus and passthrough**  
+  Use `Ctrl+E` to switch focus between terminal and explorer. Use `Ctrl+G` to toggle TUI passthrough when you want keys to go straight to the terminal app.
+
+#### LLM assist
+
+In `LLM Integration`, you can configure the endpoint, model, max tokens, auto explanation for failed commands, and the response language.
+
+- **Failure explanation**  
+  Sish can summarize failed commands into cause, detail, and concrete next steps.
+- **Inline or in nicu**  
+  In the normal terminal flow, the explanation appears inline. Inside `nicu`, the status and preview are reflected in the LLM Assist area.
+- **Configurable backend**  
+  Use your preferred compatible endpoint and model.
 
 #### Cute help for unknown commands
 ```bash
@@ -111,24 +147,6 @@ $ sish-config
 ```
 
 In `LLM Integration`, you can configure the endpoint, model, max tokens, auto explanation for failed commands, and the response language. When auto explanation runs, Sish now shows a visible querying state, boxed result, and boxed error output in both the normal terminal flow and inside `nicu`.
-
-#### nicu TUI shell
-
-`nicu` is the keyboard-first TUI workspace for Sish. It runs Sish inside an integrated terminal, adds a file explorer, and surfaces shell-side assist features such as LLM status directly in the UI.
-
-```bash
-# Launch nicu
-./nicu
-```
-
-- **Terminal + Explorer**  
-  Use Sish in the main terminal pane while browsing files in the side explorer.
-- **Keyboard-first navigation**  
-  Use `j` / `k` to move, `h` to go to the parent directory, `l` or `Enter` to open, and `g` / `G` to jump to top or bottom.
-- **Focus and passthrough**  
-  Use `Ctrl+E` to switch focus between terminal and explorer. Use `Ctrl+G` to toggle TUI passthrough when you want keys to go straight to the terminal app.
-- **Config integration**  
-  LLM-related settings changed in `sish-config` are reflected in nicu as well.
 
 #### Full zsh compatibility
 ```bash
@@ -258,6 +276,8 @@ git clone https://github.com/rintaro-s/Sish.git ~/.local/share/Sish && cd ~/.loc
 
 **無機質な"黒画面"から脱却する、日本語妹口調のシェル環境**
 
+Sish は、zsh 互換の操作性に、タイポ補助・やさしい説明・`nicu` ワークスペース・失敗時の LLM 支援を重ねたシェル体験です。
+
 ---
 
 
@@ -268,12 +288,20 @@ DebianとUbuntuのみで動作確認をしています
 ```bash
 cd Sish
 
-# 方法1: 起動スクリプト
+# 初回のみ（ローカルに Sish 用 zsh をビルド）
+./setup.sh
+
+# 方法1: シェルとして使う
 ./sish
 
-# 方法2: nicu TUIシェル
+# 方法2: nicu ワークスペースを起動する
 ./nicu
 ```
+
+- **`./sish`**  
+  Sish 本体をそのまま使います。タイポ補助、妹口調の説明、独自コマンドを軽く試すならこちらです。
+- **`./nicu`**  
+  統合ターミナル、ファイルエクスプローラ、LLM Assist をまとめたキーボード中心の作業空間を開きます。
 
 ### 言語設定 / Language Configuration
 
@@ -302,6 +330,35 @@ export SISH_LANG=ja
 ---
 
 ## 何ができるか
+
+### nicu ワークスペース
+
+`nicu` は、Sish のためのキーボード中心 TUI ワークスペースです。Sish を統合ターミナル内で動かしつつ、ファイルエクスプローラや LLM Assist を同じ画面で扱えます。
+
+```bash
+# nicu を起動
+./nicu
+```
+
+- **ターミナル + エクスプローラ**  
+  メインのターミナルで Sish を使いながら、横のエクスプローラでファイルを確認できます。
+- **LLM Assist パネル**  
+  問い合わせ中、結果プレビュー、エラー状態を UI 上で追えます。
+- **キーボード中心の移動**  
+  `j` / `k` で移動、`h` で親ディレクトリへ、`l` または `Enter` で開く、`g` / `G` で先頭・末尾へ移動できます。
+- **フォーカス切替と直通モード**  
+  `Ctrl+E` でターミナルとエクスプローラのフォーカスを切り替えます。`Ctrl+G` で TUI 直通を切り替えると、キー入力をそのままターミナルアプリへ送れます。
+
+### LLM Assist
+
+`LLM統合設定` では、エンドポイント、モデル、最大トークン数、失敗時の自動解説、生成言語を設定できます。
+
+- **失敗原因の要約**  
+  失敗したコマンドを、その場で原因・補足・次の一手に短く整理します。
+- **通常ターミナルでも nicu でも見える**  
+  通常のターミナルではインライン表示、`nicu` では LLM Assist パネルに状態が反映されます。
+- **バックエンドを調整可能**  
+  使いたい互換エンドポイントとモデルを選べます。
 
 ### 未定義コマンドを可愛く補助
 ```bash
@@ -376,24 +433,6 @@ $ sish-config
 ```
 
 `LLM統合設定` では、エンドポイント、モデル、最大トークン数、失敗時の自動解説、生成言語を設定できます。自動解説が動いたときは、通常ターミナルでも `nicu` 内でも、問い合わせ中表示・枠付き結果・枠付きエラーが見えるようになりました。
-
-### nicu TUIシェル
-
-`nicu` は、Sish のためのキーボード中心TUIワークスペースです。Sish を統合ターミナル内で動かしつつ、ファイルエクスプローラや LLM 状態表示を同じ画面で扱えます。
-
-```bash
-# nicu を起動
-./nicu
-```
-
-- **ターミナル + エクスプローラ**  
-  メインのターミナルで Sish を使いながら、横のエクスプローラでファイルを確認できます。
-- **キーボード中心の移動**  
-  `j` / `k` で移動、`h` で親ディレクトリへ、`l` または `Enter` で開く、`g` / `G` で先頭・末尾へ移動できます。
-- **フォーカス切替と直通モード**  
-  `Ctrl+E` でターミナルとエクスプローラのフォーカスを切り替えます。`Ctrl+G` で TUI 直通を切り替えると、キー入力をそのままターミナルアプリへ送れます。
-- **設定連携**  
-  `sish-config` で変更した LLM 関連設定は、`nicu` 側にも反映されます。
 
 ### 完全なzsh互換
 

@@ -30,6 +30,7 @@ pub struct Keybinds {
     pub quit: String,
     pub focus_toggle: String,
     pub passthrough_toggle: String,
+    pub layout_cycle: String,
     pub explorer_up: String,
     pub explorer_down: String,
     pub explorer_parent: String,
@@ -66,6 +67,7 @@ impl Default for Keybinds {
             quit: "alt+q,f12".to_string(),
             focus_toggle: "alt+e,f1".to_string(),
             passthrough_toggle: "alt+t".to_string(),
+            layout_cycle: "alt+m".to_string(),
             explorer_up: "k,up".to_string(),
             explorer_down: "j,down".to_string(),
             explorer_parent: "h,left,backspace,-".to_string(),
@@ -298,6 +300,9 @@ impl Config {
         }
         if self.keybinds.passthrough_toggle.trim().is_empty() {
             self.keybinds.passthrough_toggle = defaults.keybinds.passthrough_toggle;
+        }
+        if self.keybinds.layout_cycle.trim().is_empty() {
+            self.keybinds.layout_cycle = defaults.keybinds.layout_cycle;
         }
         if self.keybinds.explorer_up.trim().is_empty() {
             self.keybinds.explorer_up = defaults.keybinds.explorer_up;

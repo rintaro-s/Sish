@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sish - Sister Shell | 妹と歩むコマンドライン</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Noto+Sans+JP:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #020617;
+            color: #f1f5f9;
+            scroll-behavior: smooth;
+        }
+        .text-sister-pink { color: #f43f5e; }
+        .bg-sister-pink { background-color: #f43f5e; }
+        .border-sister-pink { border-color: #f43f5e; }
+        
+        /* Syntax Colors */
+        .syntax-cmd { color: #38bdf8; font-weight: bold; } /* Standard commands */
+        .syntax-opt { color: #94a3b8; } /* Options/Args */
+        .syntax-sister { color: #fb7185; font-weight: bold; } /* Sister's original commands */
+        .syntax-path { color: #2dd4bf; } /* Paths */
+        .syntax-error { color: #f43f5e; background: rgba(244, 63, 94, 0.1); padding: 0 4px; border-radius: 2px; }
+
+        .terminal-container {
+            background-color: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            box-shadow: 0 0 50px rgba(244, 63, 94, 0.15);
+        }
+        .terminal-header {
+            background-color: #1e293b;
+            padding: 0.6rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .dot { width: 10px; height: 10px; border-radius: 50%; }
+        .terminal-body {
+            padding: 1.5rem;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            min-height: 320px;
+            white-space: pre-wrap;
+        }
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 1.2rem;
+            background-color: #f43f5e;
+            animation: blink 1s infinite;
+            vertical-align: middle;
+            margin-left: 2px;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+        .section-active { opacity: 1; transform: translateY(0); }
+        .section-hidden { opacity: 0; transform: translateY(30px); transition: all 0.8s ease-out; }
+        
+        .onii-chan-title {
+            font-size: clamp(3rem, 10vw, 8rem);
+            line-height: 0.9;
+        }
+        .phonetic {
+            font-family: serif;
+            letter-spacing: 0.2em;
+            color: #64748b;
+        }
+
+        .command-card {
+            background: linear-gradient(145deg, #0f172a, #1e293b);
+            border: 1px solid #334155;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .command-card:hover {
+            border-color: #f43f5e;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px -10px rgba(244, 63, 94, 0.3);
+        }
+
+        /* Role Cards */
+        .role-card {
+            background: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 1rem;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            height: 100%;
+        }
+        .role-card:hover {
+            border-color: #f43f5e;
+            box-shadow: 0 0 20px rgba(244, 63, 94, 0.1);
+        }
+        .role-header {
+            background: #1e293b;
+            padding: 1rem;
+            font-weight: bold;
+            color: #f43f5e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .role-body {
+            padding: 1.5rem;
+        }
+        .role-quote {
+            background: #020617;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+            color: #94a3b8;
+            margin-top: 1rem;
+            border-left: 2px solid #f43f5e;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95);} to { opacity: 1; transform: scale(1);} }
+        .animate-fadeIn { animation: fadeIn 0.5s; }
+
+        /* Language Toggle Classes */
+        body.lang-en .lang-ja { display: none !important; }
+        body.lang-ja .lang-en { display: none !important; }
+    </style>
+</head>
+<body class="selection:bg-rose-500 selection:text-white lang-ja">
+
+    <!-- Global Modal (Language Selection) -->
+    <div id="global-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm transition-opacity duration-500" style="display:none;">
+        <div class="bg-slate-900 border-2 border-sister-pink rounded-2xl shadow-2xl max-w-lg w-full p-8 text-center relative animate-fadeIn">
+            <h2 class="text-2xl font-black text-sister-pink mb-2">Welcome to Sish</h2>
+            <p class="text-slate-400 mb-8 text-sm">Please select your preferred language / 言語を選択してください</p>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <button onclick="setLanguage('en')" class="group p-4 rounded-xl border border-slate-700 hover:border-sister-pink bg-slate-800 hover:bg-slate-800/80 transition-all">
+                    <div class="text-xl font-bold text-white mb-1">English</div>
+                    <div class="text-xs text-slate-500 group-hover:text-sister-pink">Global Mode</div>
+                </button>
+                <button onclick="setLanguage('ja')" class="group p-4 rounded-xl border border-slate-700 hover:border-sister-pink bg-slate-800 hover:bg-slate-800/80 transition-all">
+                    <div class="text-xl font-bold text-white mb-1">日本語</div>
+                    <div class="text-xs text-slate-500 group-hover:text-sister-pink">Imouto Mode</div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    window.addEventListener('DOMContentLoaded', () => {
+        const modal = document.getElementById('global-modal');
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    });
+
+    let currentLang = 'ja';
+
+    function setLanguage(lang) {
+        currentLang = lang;
+        document.body.classList.remove('lang-ja', 'lang-en');
+        document.body.classList.add('lang-' + lang);
+        
+        const modal = document.getElementById('global-modal');
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+        
+        document.querySelectorAll('.section-active .terminal-body').forEach(el => {
+            el.innerHTML = '';
+            el.dataset.started = "";
+            runDemo(el.id);
+        });
+    }
+    </script>
+
+    <!-- Hero Section -->
+    <header class="min-h-screen flex flex-col justify-center items-center text-center px-4 relative overflow-hidden">
+        <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-rose-900/30 via-transparent to-transparent"></div>
+        <div class="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent"></div>
+        
+        <h1 class="onii-chan-title font-black mb-2 tracking-tighter">
+            <span class="text-sister-pink">Sish</span>
+        </h1>
+        <div class="phonetic text-lg md:text-xl mb-8 font-light italic">/ɛs aɪ ʃɛl/</div>
+        
+        <p class="text-2xl md:text-4xl font-bold mb-6">
+            <span class="lang-ja">お兄ちゃんの隣、<span class="underline decoration-sister-pink decoration-8">予約済み</span>だから。</span>
+            <span class="lang-en">The spot right next to you, Onii-chan… <span class="underline decoration-sister-pink decoration-8">that’s all mine!</span></span>
+        </p>
+        <p class="text-lg text-slate-400 max-w-2xl mb-12 leading-relaxed">
+            <span class="lang-ja">
+                仕事中も、開発中も、ずっと一緒だよ。もう冷たい英語のエラーに怯える必要なんてない。
+                私が全部、お兄ちゃんにわかる言葉で教えてあげる。
+                「いつもの作業を妹と！」—— それが私たちの新しい日常。
+            </span>
+            <span class="lang-en">
+                Whether you're coding or just getting things done, I'll be by your side forever! No more fear of those cold system errors.
+                I’ll explain everything in words even Onii-chan can understand.
+                “Daily tasks with your little sister!” — that’s our brand-new everyday life.
+            </span>
+        </p>
+        
+        <!-- English Language Notice -->
+        <div class="lang-en max-w-xl mx-auto mb-10 p-4 bg-rose-500/10 border border-rose-500/40 rounded-2xl text-rose-200 text-sm leading-relaxed animate-fadeIn">
+            Notice: Most of the project has been translated, but there may still be some mistakes or untranslated parts.
+        </div>
+
+        <div class="flex flex-col md:flex-row gap-6">
+            <a href="#demo-start" class="bg-sister-pink hover:bg-rose-600 text-white font-black py-4 px-12 rounded-full transition-all hover:scale-110 active:scale-95 shadow-lg shadow-rose-500/20">
+                <span class="lang-ja">妹の愛を体験する</span>
+                <span class="lang-en">Experience Your Little Sister’s Care</span>
+            </a>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl mx-auto px-6 py-24 space-y-64" id="demo-start">
+
+        <!-- Case 1: Undefined Command -->
+        <section class="grid lg:grid-cols-2 gap-16 items-center section-hidden">
+            <div class="space-y-8">
+                <div class="text-sister-pink font-bold tracking-widest uppercase">Misono's Education 01</div>
+                <h2 class="text-5xl font-black">
+                    <span class="lang-ja">タイポなんて、<br>私が直してあげる。</span>
+                    <span class="lang-en">Typos? Leave them<br>to your little sister!</span>
+                </h2>
+                <div class="p-6 bg-slate-900/50 rounded-2xl border-l-4 border-sister-pink text-slate-400 italic">
+                    <span class="lang-ja">「お兄ちゃん、また間違えてるよ。しょうがないなぁ…」</span>
+                    <span class="lang-en">"Onii-chan, you made a mistake again! Honestly, you're helpless without me..."</span>
+                </div>
+                <p class="text-slate-400">
+                    <span class="lang-ja">コマンドを間違えても大丈夫。Sishはあなたの意図を読み取り、適切なコマンドを妹口調で提案します。</span>
+                    <span class="lang-en">Don't worry if you mistype a command! Sish understands what Onii-chan meant and suggests the right command in a cute sisterly tone.</span>
+                </p>
+            </div>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="dot bg-red-500"></div><div class="dot bg-yellow-500"></div><div class="dot bg-green-500"></div>
+                </div>
+                <div id="term1" class="terminal-body" data-demo="undefined"></div>
+            </div>
+        </section>
+
+        <!-- Case 2: Path Typos & Case Sensitivity -->
+        <section class="grid lg:grid-cols-2 gap-16 items-center section-hidden">
+            <div class="terminal-container lg:order-1 order-2">
+                <div class="terminal-header">
+                    <div class="dot bg-red-500"></div><div class="dot bg-yellow-500"></div><div class="dot bg-green-500"></div>
+                </div>
+                <div id="term2" class="terminal-body" data-demo="path"></div>
+            </div>
+            <div class="space-y-8 lg:order-2 order-1">
+                <div class="text-sister-pink font-bold tracking-widest uppercase">Misono's Guidance 02</div>
+                <h2 class="text-5xl font-black">
+                    <span class="lang-ja">大文字も小文字も、<br>妹が全部お見通し。</span>
+                    <span class="lang-en">Uppercase, lowercase...<br>I see through it all!</span>
+                </h2>
+                <p class="text-slate-400">
+                    <span class="lang-ja">「Github」と打っても「GitHub」へ。
+                    お兄ちゃんの小さなミスを補完して、作業を止めさせません。</span>
+                    <span class="lang-en">Even if you type "Github", I'll take you to "GitHub".
+                    I'll cover for Onii-chan's tiny slips so you can stay focused on your work!</span>
+                </p>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 text-xs">
+                        <span class="text-sister-pink font-bold italic">Automatic Fix</span><br>
+                        <span class="lang-ja">大文字小文字の自動修正</span>
+                        <span class="lang-en">Smart Case Fix</span>
+                    </div>
+                    <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 text-xs">
+                        <span class="text-sister-pink font-bold italic">Path Hint</span><br>
+                        <span class="lang-ja">それっぽいフォルダの提案</span>
+                        <span class="lang-en">Adorable Path Hints</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Case 3: Error Messages & Config -->
+        <section class="grid lg:grid-cols-2 gap-16 items-center section-hidden">
+            <div class="space-y-8">
+                <div class="text-sister-pink font-bold tracking-widest uppercase">Misono's Care 03</div>
+                <h2 class="text-5xl font-black">
+                    <span class="lang-ja">エラーの時こそ、<br>優しくしてあげる。</span>
+                    <span class="lang-en">I'll be extra sweet<br>when things go wrong!</span>
+                </h2>
+                <p class="text-slate-400">
+                    <span class="lang-ja">「ゼロで割ろうとしてるよ！」
+                    冷酷なシステムメッセージを、妹の温かい言葉に置き換えます。zshとの完全な互換性も保持。</span>
+                    <span class="lang-en">"Onii-chan, you're trying to divide by zero!"
+                    I replace cold system messages with warm, sisterly words. Fully compatible with zsh!</span>
+                </p>
+            </div>
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="dot bg-red-500"></div><div class="dot bg-yellow-500"></div><div class="dot bg-green-500"></div>
+                </div>
+                <div id="term3" class="terminal-body" data-demo="error"></div>
+            </div>
+        </section>
+
+        <!-- Case 4: Original Commands Detail -->
+        <section class="space-y-16 section-hidden">
+            <div class="text-center space-y-4">
+                <div class="text-sister-pink font-bold tracking-widest uppercase">Exclusive Commands Directory</div>
+                <h2 class="text-6xl font-black text-white">
+                    <span class="lang-ja">二人だけの合言葉</span>
+                    <span class="lang-en">Our Secret Code</span>
+                </h2>
+                <p class="text-slate-400 max-w-2xl mx-auto">
+                    <span class="lang-ja">退屈な標準コマンドを、妹への語りかけに変えて。
+                    Sish独自のコマンド体系が、お兄ちゃんの開発効率を最大化します。</span>
+                    <span class="lang-en">Turn boring standard commands into sweet chats with your sister.
+                    Sish's unique command system will make Onii-chan's development super efficient!</span>
+                </p>
+            </div>
+            
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- summon -->
+                <div class="command-card p-8 rounded-3xl">
+                    <div class="flex justify-between items-start mb-6">
+                        <code class="text-2xl font-bold text-sister-pink">summon</code>
+                        <span class="text-[18px] bg-slate-800 px-2 py-1 rounded text-slate-400 uppercase font-bold tracking-tighter">git clone</span>
+                    </div>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-4">
+                        <span class="lang-ja">リポジトリをこの場所に召喚します。わざわざcloneなんて無機質な言葉、使わなくていいんだよ。</span>
+                        <span class="lang-en">Summon a repository to this spot! You don't need to use robotic words like 'clone' anymore, okay?</span>
+                    </p>
+                    <div class="text-xs text-slate-500 font-mono">Usage: summon &lt;repo&gt;</div>
+                </div>
+
+                <!-- void -->
+                <div class="command-card p-8 rounded-3xl">
+                    <div class="flex justify-between items-start mb-6">
+                        <code class="text-2xl font-bold text-sister-pink">void</code>
+                        <span class="text-[18px] bg-slate-800 px-2 py-1 rounded text-slate-400 uppercase font-bold tracking-tighter">rm -rf</span>
+                    </div>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-4">
+                        <span class="lang-ja">視界の邪魔なものをすべて虚無へ。私が跡形もなく消しておいてあげるから、お兄ちゃんは前だけ見てて。</span>
+                        <span class="lang-en">Send everything distracting to the Void. I'll make it all disappear so Onii-chan can just keep looking forward at me!</span>
+                    </p>
+                    <div class="text-xs text-slate-500 font-mono">Usage: void &lt;path&gt;</div>
+                </div>
+
+                <!-- fiat -->
+                <div class="command-card p-8 rounded-3xl">
+                    <div class="flex justify-between items-start mb-6">
+                        <code class="text-2xl font-bold text-sister-pink">fiat</code>
+                        <span class="text-[18px] bg-slate-800 px-2 py-1 rounded text-slate-400 uppercase font-bold tracking-tighter">sudo / command execution</span>
+                    </div>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-4">
+                        <span class="lang-ja">妹が権限を代行します。お兄ちゃんが「やれ」と言えば、それが世界のルール（命令）になるんだよ。</span>
+                        <span class="lang-en">Your sister will act on your behalf. If Onii-chan says "do it", it becomes the rule of the whole world!</span>
+                    </p>
+                    <div class="text-xs text-slate-500 font-mono">Usage: fiat &lt;cmd...&gt;</div>
+                </div>
+
+                <!-- gaze -->
+                <div class="command-card p-8 rounded-3xl">
+                    <div class="flex justify-between items-start mb-6">
+                        <code class="text-2xl font-bold text-sister-pink">gaze</code>
+                        <span class="text-[18px] bg-slate-800 px-2 py-1 rounded text-slate-400 uppercase font-bold tracking-tighter">ls -lahFt</span>
+                    </div>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-4">
+                        <span class="lang-ja">ディレクトリの中身をじっと見つめます。サイズも属性も、お兄ちゃんのために見やすく整えておいたよ。</span>
+                        <span class="lang-en">Stare intently at everything inside! I've organized all the sizes and types so they're easy for Onii-chan to see.</span>
+                    </p>
+                    <div class="text-xs text-slate-500 font-mono">Usage: gaze [path]</div>
+                </div>
+
+                <!-- lore -->
+                <div class="command-card p-8 rounded-3xl">
+                    <div class="flex justify-between items-start mb-6">
+                        <code class="text-2xl font-bold text-sister-pink">lore</code>
+                        <span class="text-[18px] bg-slate-800 px-2 py-1 rounded text-slate-400 uppercase font-bold tracking-tighter">backup</span>
+                    </div>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-4">
+                        <span class="lang-ja">大切な記録（ファイル）のバックアップを作成します。お兄ちゃんのこれまでの歩み、私が守ってあげる。</span>
+                        <span class="lang-en">I'll make a backup copy of your precious records. I'll protect Onii-chan's history with all my heart!</span>
+                    </p>
+                    <div class="text-xs text-slate-500 font-mono">Usage: lore &lt;path&gt;</div>
+                </div>
+
+                <!-- genesis -->
+                <div class="command-card p-8 rounded-3xl">
+                    <div class="flex justify-between items-start mb-6">
+                        <code class="text-2xl font-bold text-sister-pink">genesis</code>
+                        <span class="text-[15px] bg-slate-800 px-2 py-1 rounded text-slate-400 uppercase font-bold tracking-tighter">git init & add & commit</span>
+                    </div>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-4">
+                        <span class="lang-ja">すべてのはじまり。リポジトリの初期化から最初のコミットまで、私が一気にやっておくね。</span>
+                        <span class="lang-en">The beginning of everything. I'll handle the init, add, and commit all at once for you!</span>
+                    </p>
+                    <div class="text-xs text-slate-500 font-mono">Usage: genesis &lt;dir&gt;</div>
+                </div>
+
+                <!-- oracle -->
+                <div class="command-card p-8 rounded-3xl lg:col-span-3">
+                    <div class="flex justify-between items-start mb-4">
+                        <code class="text-2xl font-bold text-sister-pink">oracle</code>
+                        <span class="text-[18px] bg-slate-800 px-2 py-1 rounded text-slate-400 uppercase font-bold tracking-tighter">chmod +x</span>
+                    </div>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-4">
+                        <span class="lang-ja">ファイルに実行権限という「命」を吹き込みます。これでこのスクリプトもお兄ちゃんのために動けるようになるよ。</span>
+                        <span class="lang-en">Breathe "life" into the file! Now this script can finally work its hardest for Onii-chan's sake!</span>
+                    </p>
+                    <div class="text-xs text-slate-500 font-mono">Usage: oracle &lt;path...&gt;</div>
+                </div>
+            </div>
+
+            <div class="terminal-container max-w-4xl mx-auto mt-20">
+                <div class="terminal-header">
+                    <div class="dot bg-red-500"></div><div class="dot bg-yellow-500"></div><div class="dot bg-green-500"></div>
+                    <span class="ml-auto text-xs text-slate-500 font-mono">Real Workflow Experience</span>
+                </div>
+                <div id="term4" class="terminal-body" data-demo="custom"></div>
+            </div>
+        </section>
+
+        <!-- Role (Personality Modules) -->
+        <section class="space-y-12 section-hidden">
+            <div class="text-center space-y-4">
+                <div class="text-sister-pink font-bold tracking-widest uppercase">Misono's Personality Modules</div>
+                <h2 class="text-5xl font-black">
+                    <span class="lang-ja">妹の性格、自由自在。</span>
+                    <span class="lang-en">Sister Personality: Overdrive!</span>
+                </h2>
+                <p class="text-slate-400">
+                    <span class="lang-ja">今日の気分はどの妹？ 設定ファイル一つで、Sishの性格をガラリと変更できます。</span>
+                    <span class="lang-en">What kind of sister do you want today? Change Sish's personality instantly with a single config!</span>
+                </p>
+            </div>
+
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- 0. Baseline -->
+                <div class="role-card">
+                    <div class="role-header">
+                        <span>0. Standard Mode</span>
+                        <span class="text-xs bg-slate-800 px-2 py-1 rounded text-slate-400">Default</span>
+                    </div>
+                    <div class="role-body">
+                        <div class="text-white font-bold mb-2">
+                            <span class="lang-ja">素直で世話焼き</span>
+                            <span class="lang-en">Sweet & Caring</span>
+                        </div>
+                        <ul class="text-sm text-slate-400 list-disc list-inside space-y-1 mb-4">
+                            <li><span class="lang-ja">「お兄ちゃん！」あり</span><span class="lang-en">Calls "Onii-chan!"</span></li>
+                            <li><span class="lang-ja">心配口調</span><span class="lang-en">Always worried about you</span></li>
+                        </ul>
+                        <div class="role-quote">
+                            <span class="lang-ja">Sish：お兄ちゃん！"hit"って無いよ… "git"の間違いじゃない？</span>
+                            <span class="lang-en">Sish: Onii-chan! There's no "hit"... You meant "git", right?</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 1. Strict -->
+                <div class="role-card">
+                    <div class="role-header">
+                        <span>1. Strict Mode</span>
+                        <span class="text-xs bg-slate-800 px-2 py-1 rounded text-slate-400">Efficient</span>
+                    </div>
+                    <div class="role-body">
+                        <div class="text-white font-bold mb-2">
+                            <span class="lang-ja">しっかり妹</span>
+                            <span class="lang-en">Reliable & Cool</span>
+                        </div>
+                        <ul class="text-sm text-slate-400 list-disc list-inside space-y-1 mb-4">
+                            <li><span class="lang-ja">呼びかけ無し</span><span class="lang-en">No nicknames</span></li>
+                            <li><span class="lang-ja">断定的</span><span class="lang-en">Straight to the point</span></li>
+                        </ul>
+                        <div class="role-quote">
+                            <span class="lang-ja">Sish："hit" は存在しない。"git" を実行する？</span>
+                            <span class="lang-en">Sish: "hit" does not exist. Execute "git" instead?</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Spoiled -->
+                <div class="role-card">
+                    <div class="role-header">
+                        <span>2. Spoiled Mode</span>
+                        <span class="text-xs bg-slate-800 px-2 py-1 rounded text-slate-400">Clingy</span>
+                    </div>
+                    <div class="role-body">
+                        <div class="text-white font-bold mb-2">
+                            <span class="lang-ja">甘え妹</span>
+                            <span class="lang-en">Needy & Clingy</span>
+                        </div>
+                        <ul class="text-sm text-slate-400 list-disc list-inside space-y-1 mb-4">
+                            <li><span class="lang-ja">「お兄ちゃん…」必須</span><span class="lang-en">"Onii-chan..." is a must</span></li>
+                            <li><span class="lang-ja">…多用</span><span class="lang-en">Uses lots of "..."</span></li>
+                        </ul>
+                        <div class="role-quote">
+                            <span class="lang-ja">Sish：お兄ちゃん…"hit"って無いみたい… "git"なら、あるよ…？</span>
+                            <span class="lang-en">Sish: Onii-chan... "hit" isn't there... but "git" is... maybe...?</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Impatient -->
+                <div class="role-card">
+                    <div class="role-header">
+                        <span>3. Impatient Mode</span>
+                        <span class="text-xs bg-slate-800 px-2 py-1 rounded text-slate-400">Fast</span>
+                    </div>
+                    <div class="role-body">
+                        <div class="text-white font-bold mb-2">
+                            <span class="lang-ja">せっかち妹</span>
+                            <span class="lang-en">Hasty & Restless</span>
+                        </div>
+                        <ul class="text-sm text-slate-400 list-disc list-inside space-y-1 mb-4">
+                            <li><span class="lang-ja">前置き無し</span><span class="lang-en">No introduction</span></li>
+                            <li><span class="lang-ja">即断即決</span><span class="lang-en">Auto-execution focus</span></li>
+                        </ul>
+                        <div class="role-quote">
+                            <span class="lang-ja">Sish："hit" → "git"。実行するね</span>
+                            <span class="lang-en">Sish: "hit" -> "git". Executing now!</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. Tutor -->
+                <div class="role-card">
+                    <div class="role-header">
+                        <span>4. Tutor Mode</span>
+                        <span class="text-xs bg-slate-800 px-2 py-1 rounded text-slate-400">Smart</span>
+                    </div>
+                    <div class="role-body">
+                        <div class="text-white font-bold mb-2">
+                            <span class="lang-ja">教え上手妹</span>
+                            <span class="lang-en">Smart Little Teacher</span>
+                        </div>
+                        <ul class="text-sm text-slate-400 list-disc list-inside space-y-1 mb-4">
+                            <li><span class="lang-ja">理由を説明</span><span class="lang-en">Explains why</span></li>
+                            <li><span class="lang-ja">語尾は柔らかい</span><span class="lang-en">Gentle tone</span></li>
+                        </ul>
+                        <div class="role-quote">
+                            <span class="lang-ja">Sish：お兄ちゃん、"hit"はコマンドに無いよ。"git"はバージョン管理のコマンドだよ</span>
+                            <span class="lang-en">Sish: Onii-chan, "hit" isn't a command. "git" is for version control!</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 5. Emotionless -->
+                <div class="role-card">
+                    <div class="role-header">
+                        <span>5. Null Mode</span>
+                        <span class="text-xs bg-slate-800 px-2 py-1 rounded text-slate-400">Robot</span>
+                    </div>
+                    <div class="role-body">
+                        <div class="text-white font-bold mb-2">
+                            <span class="lang-ja">無感情妹</span>
+                            <span class="lang-en">Quiet & Empty</span>
+                        </div>
+                        <ul class="text-sm text-slate-400 list-disc list-inside space-y-1 mb-4">
+                            <li><span class="lang-ja">感情語ゼロ</span><span class="lang-en">Zero emotion</span></li>
+                            <li><span class="lang-ja">句点のみ</span><span class="lang-en">Only periods.</span></li>
+                        </ul>
+                        <div class="role-quote">
+                            <span class="lang-ja">Sish："hit" 不明。"git" 提案。</span>
+                            <span class="lang-en">Sish: "hit" unknown. "git" suggested.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. Yandere -->
+                <div class="role-card">
+                    <div class="role-header">
+                        <span>6. Yandere Mode</span>
+                        <span class="text-xs bg-slate-800 px-2 py-1 rounded text-slate-400">Obsessive</span>
+                    </div>
+                    <div class="role-body">
+                        <div class="text-white font-bold mb-2">
+                            <span class="lang-ja">ヤンデレ妹</span>
+                            <span class="lang-en">Deeply Devoted</span>
+                        </div>
+                        <ul class="text-sm text-slate-400 list-disc list-inside space-y-1 mb-4">
+                            <li><span class="lang-ja">執着心が強い</span><span class="lang-en">Completely obsessed</span></li>
+                            <li><span class="lang-ja">「お兄ちゃん」必須・強制的</span><span class="lang-en">Forceful affection</span></li>
+                        </ul>
+                        <div class="role-quote">
+                            <span class="lang-ja">Sish：お兄ちゃん…"hit"なんて使わないで… "git"だけ使って…絶対に…</span>
+                            <span class="lang-en">Sish: Onii-chan... don't use "hit"... only use "git"... promise me... forever...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-950 py-32 border-t border-slate-900 text-center">
+        <div class="max-w-2xl mx-auto px-6 space-y-12">
+            <h2 class="text-5xl font-black">
+                <span class="lang-ja">お兄ちゃん、<br>準備はいい？</span>
+                <span class="lang-en">Are you ready,<br>Onii-chan?</span>
+            </h2>
+            <div class="bg-slate-900 p-8 rounded-3xl border border-slate-800 relative group">
+                <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-sister-pink text-white text-xs font-bold py-1 px-4 rounded-full">
+                    no global install, works inside repo
+                </div>
+                <div class="pt-2">
+                    <code class="text-xl md:text-2xl text-emerald-400 font-mono">git clone https://github.com/rintaro-s/Sish.git &amp;&amp; cd Sish &amp;&amp; ./setup.sh &amp;&amp; SISH_LANG=en ./sish</code>
+                </div>
+
+                <div class="mt-6 text-left text-xs text-slate-400">
+    <b>If you only want to use it temporarily on a docker:：</b><br>
+    <code class="block bg-slate-900 p-3 rounded-lg mt-2 whitespace-pre text-[13px] text-emerald-300">docker run -it --rm ubuntu:24.04 /bin/bash -c "
+  apt-get update && \\
+  apt-get install -y git && \\
+  apt-get install -y build-essential autoconf pkg-config libncursesw5-dev zsh curl && \\
+  git clone https://github.com/rintaro-s/Sish.git && \\
+  cd Sish && \\
+  chmod +x setup.sh; \\
+  ./setup.sh; \\
+  SISH_LANG=en ./sish; \\
+  echo '--- Execution finished. Opening shell for debugging ---'; \\
+  bash
+"</code>
+</div>
+                
+            </div>
+            <p class="text-slate-500">
+                <span class="lang-ja">Sishは、お兄ちゃんがもっと輝くために作られた特別なシェル環境です。<br>
+                さあ、二人だけのターミナルを始めよう。</span>
+                <span class="lang-en">Sish is a special shell environment made to help Onii-chan shine even more.<br>
+                Come on, let's start a terminal just for the two of us!</span>
+            </p>
+            <div class="pt-12 text-xs text-slate-700 font-bold tracking-[0.3em]">
+                SISH PROJECT | DEVELOPED BY LOVE
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const TYPE_SPEED = 120;
+        const LINE_DELAY = 1500;
+
+        const demoDataRaw = {
+            ja: {
+                undefined: [
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish % " },
+                    { type: "input", text: "hit clone https://github.com/rintaro-s/rintaro-s.git", highlight: true },
+                    { type: "output", text: "Sish：お兄ちゃん！<span class='syntax-error'>\"hit\"</span>って何？<span class='syntax-cmd'>\"git\"</span>の間違いじゃない？\n       ほかにも: hg, apt, pip, cat" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish % " },
+                    { type: "input", text: "y" },
+                    { type: "output", text: "<span class='text-slate-400 italic'>Cloning into 'rintaro-s'...</span>" }
+                ],
+                path: [
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish % " },
+                    { type: "input", text: "cd Github", highlight: true },
+                    { type: "output", text: "Sish：お兄ちゃん！<span class='syntax-error'>「Github」</span>は無かったよ… <span class='syntax-path'>「GitHub」</span>の間違いじゃない？\n       それっぽいフォルダ: <span class='syntax-path'>GitHub</span>\n       ヒント: パスを確認してね！" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish % " },
+                    { type: "input", text: "yy" },
+                    { type: "output", text: "Sish：お兄ちゃん！<span class='syntax-error'>\"yy\"</span>って何？<span class='syntax-cmd'>\"hg\"</span>の間違いじゃない？\n       ほかにも: yum, ls, cd, cp" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish % " },
+                    { type: "input", text: "y" },
+                    { type: "output", text: "\nSish:~/Documents/github/Sish/GitHub % ", color: "text-sister-pink" },
+                    { type: "prompt", text: "\n\n<span class='text-slate-600 italic'># 自動大文字小文字修正</span>\n" },
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish % " },
+                    { type: "input", text: "cd github", highlight: true },
+                    { type: "output", text: "\nSish:~/Documents/github/Sish/GitHub % ", color: "text-sister-pink font-bold" }
+                ],
+                error: [
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish/GitHub % " },
+                    { type: "input", text: "echo $((10 / 0))", highlight: true },
+                    { type: "output", text: "Sish：<span class='syntax-error'>ゼロで割ろうとしてるよ！</span>\n       割る数は0以外にしてね！", color: "text-rose-400" },
+                    { type: "prompt", text: "\n\n<span class='text-slate-600 italic'># 設定メニュー</span>\n" },
+                    { type: "prompt", text: "$ " },
+                    { type: "input", text: "sish-config", highlight: true },
+                    { type: "output", text: "<span class='text-emerald-500'># → インタラクティブ設定画面が開く</span>" },
+                    { type: "prompt", text: "\n\n<span class='text-slate-600 italic'># zsh互換性</span>\n" },
+                    { type: "prompt", text: "$ " },
+                    { type: "input", text: "ls | grep txt", highlight: true },
+                    { type: "prompt", text: "\n$ " },
+                    { type: "input", text: "for i in {1..5}; do echo $i; done", highlight: true },
+                    { type: "output", text: "1\n2\n3\n4\n5" }
+                ],
+                custom: [
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish/GitHub % " },
+                    { type: "input", text: "summon https://github.com/rintaro-s/rintaro-s", highlight: true, custom: true },
+                    { type: "output", text: "<span class='text-slate-400 italic'>Cloning into 'rintaro-s'...</span>" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub % " },
+                    { type: "input", text: "gaze ./rintaro-s", highlight: true, custom: true },
+                    { type: "output", text: "<span class='text-slate-500'>合計 16K\ndrwxrwxr-x 8 rinta rinta 4.0K Jan  1 21:22 .git/\ndrwxrwxr-x 3 rinta rinta 4.0K Jan  1 21:22 ./\n-rw-rw-r-- 1 rinta rinta 2.0K Jan  1 21:22 README.md\ndrwxrwxr-x 3 rinta rinta 4.0K Jan  1 21:22 ../</span>" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub % " },
+                    { type: "input", text: "cd rintaro-s", highlight: true },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub/rintaro-s % " },
+                    { type: "input", text: "lore README.md", highlight: true, custom: true },
+                    { type: "output", text: "Sish: I'll protect this memory for you, Onii-chan!" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub/rintaro-s % " },
+                    { type: "input", text: "ls", highlight: true },
+                    { type: "output", text: "README.md  <span class='syntax-path'>README.md.back</span>" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub/rintaro-s % " },
+                    { type: "input", text: "void .git", highlight: true, custom: true },
+                    { type: "output", text: "Sish: Poof! It's gone forever." },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub/rintaro-s % " },
+                    { type: "input", text: "genesis .", highlight: true, custom: true },
+                    { type: "output", text: "<span class='text-emerald-400'>Initialized empty Git repository in .../.git/\n[master (root-commit) ea82b91] first commit\n 2 files changed, 40 insertions(+)\n create mode 100644 README.md\n create mode 100644 README.md.back</span>" }
+                ]
+            },
+            en: {
+                undefined: [
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish % " },
+                    { type: "input", text: "hit clone https://github.com/rintaro-s/rintaro-s.git", highlight: true },
+                    { type: "output", text: "Sish: Onii-chan! What's <span class='syntax-error'>\"hit\"</span>? Did you mean <span class='syntax-cmd'>\"git\"</span>?\n       I’ve got other suggestions too: hg, apt, pip, cat!" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish % " },
+                    { type: "input", text: "y" },
+                    { type: "output", text: "<span class='text-slate-400 italic'>Cloning into 'rintaro-s' for you...</span>" }
+                ],
+                path: [
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish % " },
+                    { type: "input", text: "cd Github", highlight: true },
+                    { type: "output", text: "Sish: Onii-chan! There’s no folder called <span class='syntax-error'>“Github”</span>… maybe you meant <span class='syntax-path'>'GitHub'</span>?\n       Try this folder: <span class='syntax-path'>GitHub</span>\n       Check the path, okay?" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish % " },
+                    { type: "input", text: "yy" },
+                    { type: "output", text: "Sish: Onii-chan! What's <span class='syntax-error'>\"yy\"</span>? Did you mean <span class='syntax-cmd'>\"hg\"</span>?\n       How about: yum, ls, cd, cp?" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish % " },
+                    { type: "input", text: "y" },
+                    { type: "output", text: "\nSish:~/Documents/github/Sish/GitHub % ", color: "text-sister-pink" },
+                    { type: "prompt", text: "\n\n<span class='text-slate-600 italic'># Auto Case Sensitivity Fix</span>\n" },
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish % " },
+                    { type: "input", text: "cd github", highlight: true },
+                    { type: "output", text: "\nSish:~/Documents/github/Sish/GitHub % ", color: "text-sister-pink font-bold" }
+                ],
+                error: [
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish/GitHub % " },
+                    { type: "input", text: "echo $((10 / 0))", highlight: true },
+                    { type: "output", text: "Sish: <span class='syntax-error'>You're trying to divide by zero!</span>\n       That's a no-no, Onii-chan! Please use another number!", color: "text-rose-400" },
+                    { type: "prompt", text: "\n\n<span class='text-slate-600 italic'># Magic interactive config opens!</span>\n" },
+                    { type: "prompt", text: "$ " },
+                    { type: "input", text: "sish-config", highlight: true },
+                    { type: "output", text: "<span class='text-emerald-500'># -> Magic interactive config opens!</span>" },
+                    { type: "prompt", text: "\n\n<span class='text-slate-600 italic'># zsh Compatibility</span>\n" },
+                    { type: "prompt", text: "$ " },
+                    { type: "input", text: "ls | grep txt", highlight: true },
+                    { type: "prompt", text: "\n$ " },
+                    { type: "input", text: "for i in {1..5}; do echo $i; done", highlight: true },
+                    { type: "output", text: "1\n2\n3\n4\n5" }
+                ],
+                custom: [
+                    { type: "prompt", text: "Sish:~/Documents/github/Sish/GitHub % " },
+                    { type: "input", text: "summon https://github.com/rintaro-s/rintaro-s", highlight: true, custom: true },
+                    { type: "output", text: "<span class='text-slate-400 italic'>Summoning 'rintaro-s' for you...</span>" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub % " },
+                    { type: "input", text: "gaze ./rintaro-s", highlight: true, custom: true },
+                    { type: "output", text: "<span class='text-slate-500'>Total 16K\ndrwxrwxr-x 8 rinta rinta 4.0K Jan  1 21:22 .git/\ndrwxrwxr-x 3 rinta rinta 4.0K Jan  1 21:22 ./\n-rw-rw-r-- 1 rinta rinta 2.0K Jan  1 21:22 README.md\ndrwxrwxr-x 3 rinta rinta 4.0K Jan  1 21:22 ../</span>" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub % " },
+                    { type: "input", text: "cd rintaro-s", highlight: true },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub/rintaro-s % " },
+                    { type: "input", text: "lore README.md", highlight: true, custom: true },
+                    { type: "output", text: " " },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub/rintaro-s % " },
+                    { type: "input", text: "ls", highlight: true },
+                    { type: "output", text: "README.md  <span class='syntax-path'>README.md.back</span>" },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub/rintaro-s % " },
+                    { type: "input", text: "void .git", highlight: true, custom: true },
+                    { type: "output", text: " " },
+                    { type: "prompt", text: "\nSish:~/Documents/github/Sish/GitHub/rintaro-s % " },
+                    { type: "input", text: "genesis .", highlight: true, custom: true },
+                    { type: "output", text: "<span class='text-emerald-400'>Initialized empty Git repository in .../.git/\n[master (root-commit) ea82b91] first commit\n 2 files changed, 40 insertions(+)\n create mode 100644 README.md\n create mode 100644 README.md.back</span>" }
+                ]
+            }
+        };
+
+        function applyHighlight(text, isCustom) {
+            if (isCustom) {
+                const words = text.split(' ');
+                words[0] = `<span class="syntax-sister">${words[0]}</span>`;
+                return words.join(' ');
+            }
+            const commands = ['cd', 'ls', 'echo', 'git', 'hit', 'mkdir', 'for', 'grep'];
+            const words = text.split(' ');
+            if (commands.includes(words[0])) {
+                words[0] = `<span class="syntax-cmd">${words[0]}</span>`;
+            }
+            return words.join(' ');
+        }
+
+        async function typeText(el, line, speed) {
+            const fullText = line.text;
+            let currentText = "";
+            for (let i = 0; i < fullText.length; i++) {
+                currentText += fullText[i];
+                el.innerHTML = line.highlight ? applyHighlight(currentText, line.custom) : currentText;
+                await new Promise(r => setTimeout(r, speed));
+            }
+        }
+
+        async function runDemo(id) {
+            const container = document.getElementById(id);
+            const data = demoDataRaw[currentLang][container.dataset.demo];
+            container.innerHTML = "";
+
+            for (let line of data) {
+                const span = document.createElement("span");
+                if (line.color) span.className = line.color;
+                
+                if (line.type === "prompt") {
+                    span.innerHTML = line.text.replace(/\n/g, "<br>");
+                    container.appendChild(span);
+                } else if (line.type === "input") {
+                    const cursor = document.createElement("span");
+                    cursor.className = "cursor";
+                    container.appendChild(span);
+                    container.appendChild(cursor);
+                    await typeText(span, line, TYPE_SPEED);
+                    cursor.remove();
+                    await new Promise(r => setTimeout(r, 800));
+                } else if (line.type === "output") {
+                    container.appendChild(document.createElement("br"));
+                    span.innerHTML = line.text.replace(/\n/g, "<br>");
+                    span.style.opacity = "0";
+                    span.style.transition = "opacity 0.5s";
+                    container.appendChild(span);
+                    setTimeout(() => span.style.opacity = "1", 50);
+                    await new Promise(r => setTimeout(r, LINE_DELAY));
+                    container.appendChild(document.createElement("br"));
+                }
+            }
+        }
+
+        const sectionObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('section-active');
+                    entry.target.classList.remove('section-hidden');
+                    
+                    const terminal = entry.target.querySelector('.terminal-body');
+                    if (terminal && !terminal.dataset.started) {
+                        terminal.dataset.started = "true";
+                        runDemo(terminal.id);
+                    }
+                }
+            });
+        }, { threshold: 0.2 });
+
+        document.querySelectorAll('.section-hidden').forEach(el => sectionObserver.observe(el));
+    </script>
+</body>
+</html>

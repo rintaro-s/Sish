@@ -31,6 +31,14 @@ enum Focus {
     Explorer,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PanelLayout {
+    Tui,
+    LlmLarge,
+    ExplorerLarge,
+    SplitHalf,
+}
+
 #[derive(Clone)]
 struct ExplorerEntry {
     name: String,
@@ -57,6 +65,7 @@ struct App {
     explorer_selected: usize,
     show_hidden: bool,
     tui_passthrough: bool,
+    panel_layout: PanelLayout,
     auto_tui_until: Option<Instant>,
     shell_control_tail: Vec<u8>,
     status: String,
@@ -99,6 +108,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, mut app: App) -> a
                         break;
                     }
                 }
+                Event::Paste(text) => {
+                    app.handle_paste_text(&text)?;
+                }
                 Event::Resize(cols, rows) => {
                     app.resize(cols, rows)?;
                 }
@@ -129,6 +141,7 @@ impl App {
             explorer_selected: 0,
             show_hidden: false,
             tui_passthrough: false,
+            panel_layout: PanelLayout::SplitHalf,
             auto_tui_until: None,
             shell_control_tail: Vec::new(),
             status: String::new(),
@@ -179,25 +192,42 @@ impl App {
             .constraints([Constraint::Length(2), Constraint::Min(4), Constraint::Length(1)])
             .split(area);
 
+        let (terminal_percent, right_percent) = match self.panel_layout {
+            PanelLayout::SplitHalf => (55, 45),
+            PanelLayout::LlmLarge => (40, 60),
+            PanelLayout::ExplorerLarge => (45, 55),
+            PanelLayout::Tui => (72, 28),
+        };
+
         let body = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
+            .constraints([
+                Constraint::Percentage(terminal_percent),
+                Constraint::Percentage(right_percent),
+            ])
             .split(vertical[1]);
 
         let terminal_area = body[0];
         let right_area = body[1];
 
-        // Split right panel: explorer on top, LLM panel on bottom (only when LLM enabled)
-        let llm_panel_height: u16 = if self.config.llm.enabled { 8 } else { 0 };
-        let right_split = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(4),
-                Constraint::Length(llm_panel_height),
-            ])
-            .split(right_area);
-        let explorer_area = right_split[0];
-        let llm_area = right_split[1];
+        let (explorer_area, llm_area) = if self.config.llm.enabled {
+            let (explorer_ratio, llm_ratio) = match self.panel_layout {
+                PanelLayout::SplitHalf => (50, 50),
+                PanelLayout::LlmLarge => (30, 70),
+                PanelLayout::ExplorerLarge => (70, 30),
+                PanelLayout::Tui => (60, 40),
+            };
+            let right_split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Percentage(explorer_ratio),
+                    Constraint::Percentage(llm_ratio),
+                ])
+                .split(right_area);
+            (right_split[0], Some(right_split[1]))
+        } else {
+            (right_area, None)
+        };
 
         let terminal_cols = terminal_area.width.saturating_sub(2).max(1);
         let terminal_rows = terminal_area.height.saturating_sub(2).max(1);
@@ -217,7 +247,12 @@ impl App {
         } else if auto_tui {
             "passthrough(auto)"
         } else {
-            "normal"
+            match self.panel_layout {
+                PanelLayout::SplitHalf => "split(half)",
+                PanelLayout::LlmLarge => "llm(large)",
+                PanelLayout::ExplorerLarge => "explorer(large)",
+                PanelLayout::Tui => "tui(full)",
+            }
         };
         let llm_status = self.llm_status();
 
@@ -328,34 +363,36 @@ impl App {
 
         // LLM panel (only when enabled)
         if self.config.llm.enabled {
-            let llm_text = if self.llm_preview.is_empty() {
-                "(waiting for LLM activity...)".to_string()
-            } else {
-                self.llm_preview.clone()
-            };
-            let llm_color = if llm_text.starts_with("error:") || llm_text.contains("エラー") {
-                Color::LightRed
-            } else if llm_text.starts_with("LLM") || llm_text.contains("解析中") || llm_text.contains("analyzing") {
-                Color::Yellow
-            } else if llm_text.starts_with("(") {
-                Color::DarkGray
-            } else {
-                Color::Rgb(200, 230, 255)
-            };
-            let llm_widget = Paragraph::new(llm_text)
-                .style(Style::default().fg(llm_color).bg(panel_bg))
-                .wrap(Wrap { trim: false })
-                .block(
-                    Block::default()
-                        .style(Style::default().bg(panel_bg))
-                        .borders(Borders::ALL)
-                        .title(Line::from(Span::styled(
-                            "LLM Assist",
-                            Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD),
-                        )))
-                        .border_style(Style::default().fg(Color::Rgb(120, 80, 180))),
-                );
-            frame.render_widget(llm_widget, llm_area);
+            if let Some(llm_area) = llm_area {
+                let llm_text = if self.llm_preview.is_empty() {
+                    "(waiting for LLM activity...)".to_string()
+                } else {
+                    self.llm_preview.clone()
+                };
+                let llm_color = if llm_text.starts_with("error:") || llm_text.contains("エラー") {
+                    Color::LightRed
+                } else if llm_text.starts_with("LLM") || llm_text.contains("解析中") || llm_text.contains("analyzing") {
+                    Color::Yellow
+                } else if llm_text.starts_with("(") {
+                    Color::DarkGray
+                } else {
+                    Color::Rgb(200, 230, 255)
+                };
+                let llm_widget = Paragraph::new(llm_text)
+                    .style(Style::default().fg(llm_color).bg(panel_bg))
+                    .wrap(Wrap { trim: false })
+                    .block(
+                        Block::default()
+                            .style(Style::default().bg(panel_bg))
+                            .borders(Borders::ALL)
+                            .title(Line::from(Span::styled(
+                                "LLM Assist",
+                                Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD),
+                            )))
+                            .border_style(Style::default().fg(Color::Rgb(120, 80, 180))),
+                    );
+                frame.render_widget(llm_widget, llm_area);
+            }
         }
 
         let footer_text = self.status.clone();
@@ -506,8 +543,12 @@ impl App {
                 && self.shell_control_tail[i..].starts_with(NICU_PASSTHROUGH_ON)
             {
                 self.tui_passthrough = true;
+                self.panel_layout = PanelLayout::Tui;
                 self.focus = Focus::Terminal;
-                self.status = "TUI直通: ON (sish-config) | Ctrl+Tで解除".to_string();
+                self.status = format!(
+                    "TUI直通: ON (sish-config) | {}で解除",
+                    primary_bind(&self.config.keybinds.passthrough_toggle)
+                );
                 i += NICU_PASSTHROUGH_ON.len();
                 continue;
             }
@@ -516,7 +557,13 @@ impl App {
                 && self.shell_control_tail[i..].starts_with(NICU_PASSTHROUGH_OFF)
             {
                 self.tui_passthrough = false;
-                self.status = "TUI直通: OFF | Ctrl+Tで再開".to_string();
+                if self.panel_layout == PanelLayout::Tui {
+                    self.panel_layout = PanelLayout::SplitHalf;
+                }
+                self.status = format!(
+                    "TUI直通: OFF | {}で再開",
+                    primary_bind(&self.config.keybinds.passthrough_toggle)
+                );
                 i += NICU_PASSTHROUGH_OFF.len();
                 continue;
             }
@@ -545,11 +592,21 @@ impl App {
 
         if text == "nicu-passthrough=on" {
             self.tui_passthrough = true;
+            self.panel_layout = PanelLayout::Tui;
             self.focus = Focus::Terminal;
-            self.status = "TUI直通: ON (sish-config) | Alt+Tで解除".to_string();
+            self.status = format!(
+                "TUI直通: ON (sish-config) | {}で解除",
+                primary_bind(&self.config.keybinds.passthrough_toggle)
+            );
         } else if text == "nicu-passthrough=off" {
             self.tui_passthrough = false;
-            self.status = "TUI直通: OFF | Alt+Tで再開".to_string();
+            if self.panel_layout == PanelLayout::Tui {
+                self.panel_layout = PanelLayout::SplitHalf;
+            }
+            self.status = format!(
+                "TUI直通: OFF | {}で再開",
+                primary_bind(&self.config.keybinds.passthrough_toggle)
+            );
         }
     }
 
@@ -564,12 +621,26 @@ impl App {
 
         let auto_tui = self.auto_tui_active();
 
+        if self.config.bind_matches(&self.config.keybinds.paste, &key) {
+            self.paste_from_clipboard()?;
+            return Ok(false);
+        }
+
+        if self.config.bind_matches(&self.config.keybinds.layout_cycle, &key) && !auto_tui {
+            self.cycle_panel_layout();
+            return Ok(false);
+        }
+
         if self.config.bind_matches(&self.config.keybinds.passthrough_toggle, &key) && !auto_tui {
             self.focus = Focus::Terminal;
             self.tui_passthrough = !self.tui_passthrough;
             self.status = if self.tui_passthrough {
+                self.panel_layout = PanelLayout::Tui;
                 "TUI直通: ON(manual) | 同じキーで解除".to_string()
             } else {
+                if self.panel_layout == PanelLayout::Tui {
+                    self.panel_layout = PanelLayout::SplitHalf;
+                }
                 "TUI直通: OFF(manual) | 自動判定は継続".to_string()
             };
             return Ok(false);
@@ -754,6 +825,8 @@ impl App {
 
         self.config.bind_matches(&self.config.keybinds.quit, &key)
             || self.config.bind_matches(&self.config.keybinds.focus_toggle, &key)
+            || self.config.bind_matches(&self.config.keybinds.layout_cycle, &key)
+            || self.config.bind_matches(&self.config.keybinds.paste, &key)
             || self.config.bind_matches(&self.config.keybinds.passthrough_toggle, &key)
             || self.config.bind_matches(&self.config.keybinds.copy_output, &key)
             || self.config.bind_matches(&self.config.keybinds.explorer_open, &key)
@@ -814,10 +887,12 @@ impl App {
 
     fn default_status(&self) -> String {
         format!(
-            "{}: quit | {}: focus | {}: passthrough | explorer: j/k h/l g G ^u ^d . | q/esc: terminal",
+            "{}: quit | {}: focus | {}: passthrough | {}: layout | {}: paste | explorer: j/k h/l g G ^u ^d . | q/esc: terminal",
             primary_bind(&self.config.keybinds.quit),
             primary_bind(&self.config.keybinds.focus_toggle),
-            primary_bind(&self.config.keybinds.passthrough_toggle)
+            primary_bind(&self.config.keybinds.passthrough_toggle),
+            primary_bind(&self.config.keybinds.layout_cycle),
+            primary_bind(&self.config.keybinds.paste)
         )
     }
 
@@ -873,6 +948,61 @@ impl App {
         } else {
             self.status = "clipboard copy failed".to_string();
         }
+    }
+
+    fn paste_from_clipboard(&mut self) -> anyhow::Result<()> {
+        let Some(clipboard) = self.clipboard.as_mut() else {
+            self.status = "clipboard unavailable (try Shift+Insert or terminal paste)".to_string();
+            return Ok(());
+        };
+
+        match clipboard.get_text() {
+            Ok(text) => self.handle_paste_text(&text),
+            Err(_) => {
+                self.status = "clipboard paste failed".to_string();
+                Ok(())
+            }
+        }
+    }
+
+    fn handle_paste_text(&mut self, text: &str) -> anyhow::Result<()> {
+        if text.is_empty() {
+            return Ok(());
+        }
+
+        self.focus = Focus::Terminal;
+        self.shell.send_bytes(text.as_bytes())?;
+        self.status = format!("pasted {} chars", text.chars().count());
+        Ok(())
+    }
+
+    fn cycle_panel_layout(&mut self) {
+        self.panel_layout = match self.panel_layout {
+            PanelLayout::Tui => {
+                self.tui_passthrough = false;
+                PanelLayout::LlmLarge
+            }
+            PanelLayout::LlmLarge => {
+                self.tui_passthrough = false;
+                PanelLayout::ExplorerLarge
+            }
+            PanelLayout::ExplorerLarge => {
+                self.tui_passthrough = false;
+                PanelLayout::SplitHalf
+            }
+            PanelLayout::SplitHalf => {
+                self.tui_passthrough = true;
+                PanelLayout::Tui
+            }
+        };
+
+        self.focus = Focus::Terminal;
+        self.status = match self.panel_layout {
+            PanelLayout::Tui => "layout: TUI full terminal".to_string(),
+            PanelLayout::LlmLarge => "layout: LLM large".to_string(),
+            PanelLayout::ExplorerLarge => "layout: Explorer large".to_string(),
+            PanelLayout::SplitHalf => "layout: Explorer/LLM half split".to_string(),
+        };
     }
 
     fn render_terminal_cells(

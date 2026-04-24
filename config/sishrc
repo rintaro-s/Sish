@@ -50,6 +50,7 @@ setopt AUTO_CD              # ディレクトリ名だけで移動
 unsetopt CORRECT            # コマンド訂正（Sishの提案と競合するので無効）
 unsetopt CORRECTALL
 setopt NOCORRECT
+setopt NONOMATCH            # what? など文字を含むコマンド名を許可
 setopt HIST_IGNORE_DUPS     # 重複履歴を無視
 setopt SHARE_HISTORY        # 履歴を共有
 
@@ -85,6 +86,9 @@ alias dc='docker-compose'
 # Python
 alias py='python3'
 alias ipy='ipython'
+
+# LLM explain shortcut
+alias 'what?'='sish-llm-explain'
 
 # ========================================
 # 便利な関数
@@ -448,6 +452,7 @@ if [[ -o interactive ]]; then
     zle -N sish_nicu_widget
     bindkey -M emacs '^G' sish_nicu_widget
     bindkey -M viins '^G' sish_nicu_widget
+    bindkey -M vicmd '^G' sish_nicu_widget
 fi
 
 # ディレクトリ作成と移動

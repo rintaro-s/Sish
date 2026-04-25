@@ -36,6 +36,7 @@ cd Sish
   Use the shell directly with Sish's typo recovery, personality modes, and friendly command help.
 - **`./nicu`**
   Open the keyboard-first TUI workspace that embeds Sish, adds a file explorer, and shows LLM activity in the UI.
+  > **Note:** Using nicu mode requires Rust to be installed on your system.
 
 #### Language Configuration
 
@@ -78,8 +79,11 @@ See [docs/LANGUAGE.md](docs/LANGUAGE.md) for details.
   See the current LLM querying state, explanation results, and error states without leaving the workspace.
 - **Keyboard-first navigation**  
   Use `j` / `k` to move, `h` to go to the parent directory, `l` or `Enter` to open, and `g` / `G` to jump to top or bottom.
-- **Focus and passthrough**  
-  Use `Ctrl+E` to switch focus between terminal and explorer. Use `Ctrl+G` to toggle TUI passthrough when you want keys to go straight to the terminal app.
+- **Keyboard shortcuts**  
+  - `Ctrl+E`: Switch focus between terminal and explorer
+  - `Alt+E`: Open explorer
+  - `Ctrl+G`: Launch nicu workspace (from sish)
+  - `Alt+Q`: Quit/escape
 
 #### LLM assist
 
@@ -303,6 +307,7 @@ cd Sish
   Sish 本体をそのまま使います。タイポ補助、妹口調の説明、独自コマンドを軽く試すならこちらです。
 - **`./nicu`**  
   統合ターミナル、ファイルエクスプローラ、LLM Assist をまとめたキーボード中心の作業空間を開きます。
+  > **注意:** nicu モードを使用するには、システムに Rust がインストールされている必要があります。
 
 ### 言語設定 / Language Configuration
 
@@ -347,8 +352,11 @@ export SISH_LANG=ja
   問い合わせ中、結果プレビュー、エラー状態を UI 上で追えます。
 - **キーボード中心の移動**  
   `j` / `k` で移動、`h` で親ディレクトリへ、`l` または `Enter` で開く、`g` / `G` で先頭・末尾へ移動できます。
-- **フォーカス切替と直通モード**  
-  `Ctrl+E` でターミナルとエクスプローラのフォーカスを切り替えます。`Ctrl+G` で TUI 直通を切り替えると、キー入力をそのままターミナルアプリへ送れます。
+- **キーボードショートカット**  
+  - `Ctrl+E`: ターミナルとエクスプローラのフォーカス切替
+  - `Alt+E`: エクスプローラを開く
+  - `Ctrl+G`: nicu ワークスペースを起動（sishから）
+  - `Alt+Q`: 終了/エスケープ
 
 ### LLM Assist
 

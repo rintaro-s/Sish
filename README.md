@@ -174,9 +174,10 @@ sudo pacman -S base-devel autoconf ncurses
 ```
 
 **Known compatibility:**
-- ✅ Ubuntu 20.04, 22.04, 24.04 (ncurses 5.x and 6.x)
-- ✅ Debian 11, 12
-- ✅ Docker (ubuntu:24.04, debian:12, etc.)
+- Ubuntu 20.04, 22.04, 24.04 (ncurses 5.x and 6.x)
+- Debian 11, 12
+- Docker (ubuntu:24.04, debian:12, etc.)
+- Arch (Nyarch-2026/04/20)
 
 **Build output:**
 ```bash

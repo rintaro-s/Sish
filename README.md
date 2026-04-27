@@ -1,5 +1,5 @@
 
-## Sish - Sister Shell
+## Sish - Sister-Shell
 
 **No more boring 'black screens'—meet the shell environment with a cute little sister personality.**
 

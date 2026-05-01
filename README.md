@@ -279,6 +279,8 @@ git clone https://github.com/rintaro-s/Sish.git ~/.local/share/Sish && cd ~/.loc
 
 # Sish - Sister Shell
 
+(英語を編集して反映させたので逆翻訳になってます。見づらくてすみません。間違ってないかは確認しました)
+
 **無機質な"黒画面"から脱却する、日本語妹口調のシェル環境**
 
 Sish は、zsh 互換の操作性に、タイポ補助・やさしい説明・`nicu` ワークスペース・失敗時の LLM 支援を重ねたシェル体験です。
